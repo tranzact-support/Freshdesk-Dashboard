@@ -1,0 +1,7 @@
+# Freshdesk activity dashboard export once per day at 08:00.
+# This creates a separate HTML/CSV/JSON dashboard connected to Freshdesk via API.
+0 8 * * * cd /Users/shishirraj/freshdesk-tool && /usr/bin/python3 freshdesk_activity_dashboard.py >> /Users/shishirraj/freshdesk-tool/freshdesk_activity_dashboard.log 2>&1
+
+# If you want Freshdesk tags to stay in sync with customer revert detection,
+# replace the line above with this one after validating the results once:
+# 0 8 * * * cd /Users/shishirraj/freshdesk-tool && /usr/bin/python3 freshdesk_activity_dashboard.py --sync-customer-revert-tag >> /Users/shishirraj/freshdesk-tool/freshdesk_activity_dashboard.log 2>&1

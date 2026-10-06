@@ -1,0 +1,2 @@
+* * * * * cd /Users/shishirraj/freshdesk-tool && /usr/bin/python3 ticket_note_watcher.py >> /Users/shishirraj/freshdesk-tool/ticket_note_watcher.log 2>&1
+*/5 * * * * cd /Users/shishirraj/freshdesk-tool && /usr/bin/python3 ticket_note_healthcheck.py >> /Users/shishirraj/freshdesk-tool/ticket_note_healthcheck.log 2>&1

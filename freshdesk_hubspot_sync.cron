@@ -1,0 +1,5 @@
+# Freshdesk -> HubSpot 4-hour sync:
+# creates/updates HubSpot tickets for eligible Freshdesk tickets,
+# assigns owner to Shabib, fills POC details, links contact, and links deal(s).
+0 */4 * * * cd /Users/shishirraj/freshdesk-tool && /usr/bin/python3 freshdesk_hubspot_sync.py >> /Users/shishirraj/freshdesk-tool/freshdesk_hubspot_sync.log 2>&1
+*/15 * * * * cd /Users/shishirraj/freshdesk-tool && /usr/bin/python3 freshdesk_hubspot_sync_healthcheck.py --phone 9955504604 >> /Users/shishirraj/freshdesk-tool/freshdesk_hubspot_sync_healthcheck.log 2>&1

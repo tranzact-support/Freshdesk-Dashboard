@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: freshdesk-dashboard
+    runtime: python
+    plan: starter
+    rootDir: .
+    buildCommand: "python3 -m py_compile freshdesk_activity_dashboard.py freshdesk_activity_dashboard_web.py"
+    startCommand: "python3 freshdesk_activity_dashboard_web.py --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.10
+      - key: DASHBOARD_AUTO_REFRESH_SECONDS
+        value: "86400"
+      - key: DASHBOARD_REFRESH_ON_START
+        value: "1"
+      - key: DASHBOARD_OUTPUT_DIR
+        value: dashboard
+      - key: ACTIVITY_DASHBOARD_ALL_TICKETS
+        value: "1"
+      - key: ACTIVITY_DASHBOARD_REPLY_SLA_HOURS
+        value: "24"
+      - key: ACTIVITY_DASHBOARD_MAX_RETRIES
+        value: "8"
+      - key: ACTIVITY_DASHBOARD_RETRY_DELAY_SECONDS
+        value: "2"
+      - key: FRESHDESK_DOMAIN
+        sync: false
+      - key: FRESHDESK_API_KEY
+        sync: false

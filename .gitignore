@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+dashboard/
+*.log
+*.csv
+.freshdesk_*_state.json
+.freshdesk_*_status.json
+.ticket_*_state.json
+.ticket_*_status.json
