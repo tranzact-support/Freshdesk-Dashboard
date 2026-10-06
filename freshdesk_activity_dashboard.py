@@ -1332,6 +1332,15 @@ def main() -> int:
             break
         page += 1
 
+    activity_cache_path = output_dir / ".freshdesk_activity_cache.json"
+    agent_cache_path = output_dir / ".freshdesk_agent_cache.json"
+    requester_company_cache_path = output_dir / ".freshdesk_requester_company_cache.json"
+    company_name_cache_path = output_dir / ".freshdesk_company_name_cache.json"
+    activity_cache = load_activity_cache(activity_cache_path)
+    agent_cache = load_agent_cache(agent_cache_path)
+    requester_company_cache = load_string_cache(requester_company_cache_path, "requester_companies")
+    company_name_cache = load_string_cache(company_name_cache_path, "companies")
+
     responder_ids = sorted({as_int(ticket.get("responder_id")) or 0 for ticket in tickets if as_int(ticket.get("responder_id"))})
     agent_names: Dict[int, str] = {}
     for responder_id in responder_ids:
@@ -1377,14 +1386,6 @@ def main() -> int:
 
     rows: List[Dict[str, object]] = []
     tag_sync = {"updated": 0, "unchanged": 0, "failed": 0}
-    activity_cache_path = output_dir / ".freshdesk_activity_cache.json"
-    agent_cache_path = output_dir / ".freshdesk_agent_cache.json"
-    requester_company_cache_path = output_dir / ".freshdesk_requester_company_cache.json"
-    company_name_cache_path = output_dir / ".freshdesk_company_name_cache.json"
-    activity_cache = load_activity_cache(activity_cache_path)
-    agent_cache = load_agent_cache(agent_cache_path)
-    requester_company_cache = load_string_cache(requester_company_cache_path, "requester_companies")
-    company_name_cache = load_string_cache(company_name_cache_path, "companies")
     conversation_fetches = 0
     conversation_skips = 0
     conversation_cache_hits = 0
