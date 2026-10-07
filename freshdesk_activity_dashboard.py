@@ -43,6 +43,10 @@ DEFAULT_RETRY_COUNT = 8
 DEFAULT_RETRY_DELAY_SECONDS = 2.0
 DEFAULT_CONVERSATION_WORKERS = 8
 
+TICKET_TYPE_ALIASES = {
+    "Feature Request": "Feature Idea",
+}
+
 SLA_RULES = {
     "Bug": {
         "Urgent": {"ack_hours": 0.25, "resolution_hours": 1, "label": "Bug"},
@@ -61,12 +65,12 @@ SLA_RULES = {
         "Medium": {"ack_hours": 24, "resolution_hours": 120, "max_hours": 168, "label": "Experience Task"},
     },
     "Feature Idea": {
-        "Medium": {"ack_hours": 24, "resolution_hours": 168, "label": "Feature Request"},
-        "Low": {"ack_hours": 24, "resolution_hours": 720, "label": "Feature Request"},
+        "Medium": {"ack_hours": 24, "resolution_hours": 168, "label": "Feature Idea"},
+        "Low": {"ack_hours": 24, "resolution_hours": 720, "label": "Feature Idea"},
     },
     "Feature Request": {
-        "Medium": {"ack_hours": 24, "resolution_hours": 168, "label": "Feature Request"},
-        "Low": {"ack_hours": 24, "resolution_hours": 720, "label": "Feature Request"},
+        "Medium": {"ack_hours": 24, "resolution_hours": 168, "label": "Feature Idea"},
+        "Low": {"ack_hours": 24, "resolution_hours": 720, "label": "Feature Idea"},
     },
 }
 
@@ -352,6 +356,11 @@ def priority_label(priority_value: object) -> str:
     return PRIORITY_LABELS.get(numeric, str(numeric))
 
 
+def normalize_ticket_type(value: object) -> str:
+    ticket_type = str(value or "").strip()
+    return TICKET_TYPE_ALIASES.get(ticket_type, ticket_type)
+
+
 def format_duration_hours(hours: Optional[float]) -> str:
     if hours is None:
         return "NA"
@@ -366,16 +375,17 @@ def format_duration_hours(hours: Optional[float]) -> str:
 
 
 def classify_sla_rule(ticket_type: str, priority_name: str) -> Dict[str, object]:
+    ticket_type = normalize_ticket_type(ticket_type)
     type_rules = SLA_RULES.get(ticket_type, {})
     rule = type_rules.get(priority_name)
     if rule:
         return dict(rule)
     if ticket_type == "Task - Experience Team" and priority_name == "Urgent":
         return dict(type_rules.get("High", {}))
-    if ticket_type in {"Feature Idea", "Feature Request"} and priority_name in {"High", "Urgent"}:
-        return {"ack_hours": 24, "label": "Feature Request", "internal_review": True}
+    if ticket_type == "Feature Idea" and priority_name in {"High", "Urgent"}:
+        return {"ack_hours": 24, "label": "Feature Idea", "internal_review": True}
     if ticket_type == "Usability FI":
-        return {"ack_hours": 24, "resolution_hours": 168, "label": "Feature Request"}
+        return {"ack_hours": 24, "resolution_hours": 168, "label": "Feature Idea"}
     if ticket_type == "Service Request":
         return {"ack_hours": 24, "resolution_hours": 168, "label": "Task"}
     return {"ack_hours": 24, "label": ticket_type or "Other"}
@@ -741,7 +751,7 @@ def build_row(
         "status_label": status_label(ticket.get("status"), status_choices),
         "priority": as_int(ticket.get("priority")) or 0,
         "priority_label": priority_label(ticket.get("priority")),
-        "type": str(ticket.get("type") or "").strip(),
+        "type": normalize_ticket_type(ticket.get("type")),
         "company_name": str(ticket.get("_company_name") or "").strip() or "Unknown",
         "source": as_int(ticket.get("source")) or 0,
         "created_at": str(ticket.get("created_at") or ""),
