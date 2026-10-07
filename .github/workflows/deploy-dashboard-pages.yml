@@ -1,0 +1,72 @@
+name: Deploy dashboard to GitHub Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "15 * * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      FRESHDESK_DOMAIN: ${{ secrets.FRESHDESK_DOMAIN }}
+      FRESHDESK_API_KEY: ${{ secrets.FRESHDESK_API_KEY }}
+      ACTIVITY_DASHBOARD_ALL_TICKETS: "1"
+      ACTIVITY_DASHBOARD_REPLY_SLA_HOURS: "24"
+      ACTIVITY_DASHBOARD_MAX_RETRIES: "8"
+      ACTIVITY_DASHBOARD_RETRY_DELAY_SECONDS: "2"
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+
+      - name: Verify required secrets
+        run: |
+          test -n "$FRESHDESK_DOMAIN"
+          test -n "$FRESHDESK_API_KEY"
+
+      - name: Build static dashboard
+        run: |
+          python3 freshdesk_activity_dashboard.py --output-dir dashboard
+
+      - name: Package GitHub Pages artifact
+        run: |
+          rm -rf _site
+          mkdir -p _site/dashboard
+          cp dashboard/freshdesk_activity_dashboard.html _site/index.html
+          cp dashboard/freshdesk_activity_dashboard.html _site/dashboard/freshdesk_activity_dashboard.html
+          cp dashboard/freshdesk_activity_dashboard.json _site/dashboard/freshdesk_activity_dashboard.json
+          cp dashboard/freshdesk_activity_dashboard.csv _site/dashboard/freshdesk_activity_dashboard.csv
+          cp dashboard/.freshdesk_activity_dashboard_status.json _site/dashboard/.freshdesk_activity_dashboard_status.json
+          touch _site/.nojekyll
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
