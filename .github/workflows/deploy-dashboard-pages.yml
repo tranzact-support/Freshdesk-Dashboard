@@ -6,7 +6,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: "15 * * * *"
+    - cron: "15 */6 * * *"
 
 permissions:
   contents: read
@@ -15,17 +15,16 @@ permissions:
 
 concurrency:
   group: github-pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 180
     env:
       FRESHDESK_DOMAIN: ${{ secrets.FRESHDESK_DOMAIN }}
       FRESHDESK_API_KEY: ${{ secrets.FRESHDESK_API_KEY }}
-      ACTIVITY_DASHBOARD_ALL_TICKETS: "0"
-      ACTIVITY_DASHBOARD_LOOKBACK_DAYS: "30"
+      ACTIVITY_DASHBOARD_ALL_TICKETS: "1"
       ACTIVITY_DASHBOARD_REPLY_SLA_HOURS: "24"
       ACTIVITY_DASHBOARD_MAX_RETRIES: "8"
       ACTIVITY_DASHBOARD_RETRY_DELAY_SECONDS: "2"
@@ -46,9 +45,26 @@ jobs:
           test -n "$FRESHDESK_DOMAIN"
           test -n "$FRESHDESK_API_KEY"
 
+      - name: Restore dashboard caches
+        id: restore-dashboard-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: dashboard
+          key: dashboard-cache-${{ github.run_id }}
+          restore-keys: |
+            dashboard-cache-
+
       - name: Build static dashboard
         run: |
-          python3 freshdesk_activity_dashboard.py --output-dir dashboard --lookback-days 30 --conversation-workers 16
+          mkdir -p dashboard
+          python3 freshdesk_activity_dashboard.py --output-dir dashboard --all-tickets --conversation-workers 16
+
+      - name: Save dashboard caches
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: dashboard
+          key: dashboard-cache-${{ github.run_id }}
 
       - name: Package GitHub Pages artifact
         run: |
