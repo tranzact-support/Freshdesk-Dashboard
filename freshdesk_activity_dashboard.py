@@ -434,6 +434,8 @@ def build_sla_metrics(ticket: Dict[str, object], row: Dict[str, object]) -> Dict
     red_flag = ack_state == "breached" or resolution_state == "breached" or max_state == "breached"
     amber_flag = (not red_flag) and (ack_state == "at_risk" or resolution_state == "at_risk" or max_state == "at_risk")
 
+    status_label_value = str(row.get("status_label") or "")
+
     owner_team = "Technical Team"
     if ticket_type == "Task - Experience Team":
         owner_team = "Experience Team"
@@ -445,7 +447,6 @@ def build_sla_metrics(ticket: Dict[str, object], row: Dict[str, object]) -> Dict
             owner_team = "Customer Delight"
 
     sop_action = "Monitor"
-    status_label_value = str(row.get("status_label") or "")
     if max_state == "breached":
         sop_action = "Escalate internally"
     elif resolution_state == "breached" or ack_state == "breached":
