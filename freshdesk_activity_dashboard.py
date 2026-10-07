@@ -36,7 +36,6 @@ PRIORITY_LABELS = {
     4: "Urgent",
 }
 CLOSED_STATUSES = {4, 5}
-HIGHLIGHTED_STATUSES = {2, 3}
 DEFAULT_OUTPUT_DIR = "dashboard"
 DEFAULT_REVERT_TAG = "customer_reverted"
 DEFAULT_ALL_TICKETS_SINCE = "1970-01-01"
@@ -362,6 +361,16 @@ def normalize_ticket_type(value: object) -> str:
     return TICKET_TYPE_ALIASES.get(ticket_type, ticket_type)
 
 
+def is_highlightable_status(status_value: object, status_label_value: object = "") -> bool:
+    numeric = as_int(status_value)
+    if numeric in CLOSED_STATUSES:
+        return False
+    label = str(status_label_value or "").strip().lower()
+    if "reject" in label:
+        return False
+    return True
+
+
 def format_duration_hours(hours: Optional[float]) -> str:
     if hours is None:
         return "NA"
@@ -418,8 +427,9 @@ def evaluate_deadline(
 def build_sla_metrics(ticket: Dict[str, object], row: Dict[str, object]) -> Dict[str, object]:
     priority_name = row.get("priority_label") or ""
     ticket_type = row.get("type") or ""
-    status_value = as_int(ticket.get("status")) or 0
-    highlight_enabled = status_value in HIGHLIGHTED_STATUSES
+    status_value = ticket.get("status")
+    status_label_value = str(row.get("status_label") or "")
+    highlight_enabled = is_highlightable_status(status_value, status_label_value)
     rule = classify_sla_rule(ticket_type, priority_name)
     stats = ticket.get("stats") if isinstance(ticket.get("stats"), dict) else {}
     created_at = parse_iso(ticket.get("created_at"))
@@ -455,8 +465,6 @@ def build_sla_metrics(ticket: Dict[str, object], row: Dict[str, object]) -> Dict
     amber_flag = highlight_enabled and (not red_flag) and (
         ack_state == "at_risk" or resolution_state == "at_risk" or max_state == "at_risk"
     )
-
-    status_label_value = str(row.get("status_label") or "")
 
     owner_team = "Technical Team"
     if ticket_type == "Task - Experience Team":
@@ -636,7 +644,7 @@ def build_activity_metrics(
         last_activity_user_name = timeline[-1].get("actor_name") or last_activity_user_name
         last_activity_preview = timeline[-1]["preview"] or "Conversation updated"
 
-    unresolved = as_int(ticket.get("status")) in HIGHLIGHTED_STATUSES
+    unresolved = is_highlightable_status(ticket.get("status"))
     customer_reverted = bool(
         unresolved
         and last_customer_reply_at
@@ -796,6 +804,11 @@ def build_row(
     }
     row.update(metrics)
     row.update(build_sla_metrics(ticket, row))
+    if not is_highlightable_status(row.get("status"), row.get("status_label")):
+        row["customer_reverted"] = False
+        row["reply_age_hours"] = None
+        row["reply_highlight"] = "ok"
+        row["should_add_revert_tag"] = False
     last_action_label, last_action_detail = classify_last_action(row, previous_row)
     row["last_action_label"] = last_action_label
     row["last_action_detail"] = last_action_detail
