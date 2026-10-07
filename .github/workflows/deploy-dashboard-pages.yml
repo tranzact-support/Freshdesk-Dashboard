@@ -20,10 +20,12 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       FRESHDESK_DOMAIN: ${{ secrets.FRESHDESK_DOMAIN }}
       FRESHDESK_API_KEY: ${{ secrets.FRESHDESK_API_KEY }}
-      ACTIVITY_DASHBOARD_ALL_TICKETS: "1"
+      ACTIVITY_DASHBOARD_ALL_TICKETS: "0"
+      ACTIVITY_DASHBOARD_LOOKBACK_DAYS: "30"
       ACTIVITY_DASHBOARD_REPLY_SLA_HOURS: "24"
       ACTIVITY_DASHBOARD_MAX_RETRIES: "8"
       ACTIVITY_DASHBOARD_RETRY_DELAY_SECONDS: "2"
@@ -46,7 +48,7 @@ jobs:
 
       - name: Build static dashboard
         run: |
-          python3 freshdesk_activity_dashboard.py --output-dir dashboard
+          python3 freshdesk_activity_dashboard.py --output-dir dashboard --lookback-days 30 --conversation-workers 16
 
       - name: Package GitHub Pages artifact
         run: |
