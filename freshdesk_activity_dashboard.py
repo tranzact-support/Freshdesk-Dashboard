@@ -947,7 +947,11 @@ def build_dashboard_html(
     .tab-btn, button, a.btn { background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:10px; padding:10px 14px; cursor:pointer; text-decoration:none; }
     .tab-btn.active, button.primary, a.btn.primary { background:#2563eb; border-color:#2563eb; color:white; }
     .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin: 18px 0; }
-    .card { background:#111827; border:1px solid #334155; border-radius:12px; padding:14px; min-width:180px; }
+    .card { background:#111827; border:1px solid #334155; border-radius:12px; padding:0; min-width:180px; overflow:hidden; }
+    .card-button { width:100%; background:transparent; color:inherit; border:0; padding:14px; text-align:left; cursor:pointer; }
+    .card-button:hover { background:#172033; }
+    .card-button.active { background:#1d4ed8; }
+    .card-button.active .label, .card-button.active .value { color:#ffffff; }
     .card .label { color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
     .card .value { font-size:28px; font-weight:700; margin-top:8px; }
     .controls { align-items:flex-start; margin-bottom:14px; }
@@ -1032,6 +1036,7 @@ def build_dashboard_html(
     const summary = data.summary || {};
     const rows = data.rows || [];
     let currentView = 'activity';
+    const activeCardFilters = { activity: 'tickets', sla: 'tickets' };
     function escapeHtml(text) { return String(text || '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'); }
     function renderCheckboxGroup(containerId, options, allLabel, searchable = false) {
       const container = document.getElementById(containerId);
@@ -1069,7 +1074,22 @@ def build_dashboard_html(
       if (row.max_timeline_state === 'breached') states.push('max_timeline_breached');
       return selections.some((item) => states.includes(item));
     }
-    function filteredRows(view) {
+    function matchesCardFilter(row, view, cardFilter) {
+      if (!cardFilter || cardFilter === 'tickets') return true;
+      if (view === 'activity') {
+        if (cardFilter === 'customer_reverted') return Boolean(row.customer_reverted);
+        if (cardFilter === 'overdue_replies') return row.reply_highlight === 'overdue';
+        if (cardFilter === 'waiting_replies') return row.reply_highlight === 'waiting';
+        if (cardFilter === 'tagged') return Boolean(row.has_customer_revert_tag);
+        return true;
+      }
+      if (cardFilter === 'red_flags') return Boolean(row.sla_red_flag);
+      if (cardFilter === 'at_risk') return Boolean(row.sla_amber_flag);
+      if (cardFilter === 'ack_breaches') return row.ack_state === 'breached';
+      if (cardFilter === 'resolution_breaches') return row.resolution_state === 'breached';
+      return true;
+    }
+    function filteredRows(view, includeCardFilter = true) {
       const query = document.getElementById(view === 'activity' ? 'activity-search' : 'sla-search').value.trim().toLowerCase();
       const highlights = view === 'activity' ? selectedValues('activity-filter-highlight') : [];
       const statuses = selectedValues(view === 'activity' ? 'activity-filter-status' : 'sla-filter-status');
@@ -1090,19 +1110,41 @@ def build_dashboard_html(
           if (!highlights.includes(row.reply_highlight) && !highlights.includes(highlightValue)) return false;
         }
         if (view === 'sla' && !matchesSla(row, slaFlags)) return false;
+        if (includeCardFilter && !matchesCardFilter(row, view, activeCardFilters[view])) return false;
         return true;
       });
     }
     function renderCards(activityRows, slaRows) {
       const cards = currentView === 'activity'
-        ? [['Tickets', activityRows.length], ['Customer Reverted', activityRows.filter((row) => row.customer_reverted).length], ['Overdue Replies', activityRows.filter((row) => row.reply_highlight === 'overdue').length], ['Waiting Replies', activityRows.filter((row) => row.reply_highlight === 'waiting').length], ['Tagged', activityRows.filter((row) => row.has_customer_revert_tag).length]]
-        : [['Tickets', slaRows.length], ['Red Flags', slaRows.filter((row) => row.sla_red_flag).length], ['At Risk', slaRows.filter((row) => row.sla_amber_flag).length], ['Ack Breaches', slaRows.filter((row) => row.ack_state === 'breached').length], ['Resolution Breaches', slaRows.filter((row) => row.resolution_state === 'breached').length]];
-      document.getElementById('cards').innerHTML = cards.map(([label, value]) => `<div class="card"><div class="label">${label}</div><div class="value">${value ?? 0}</div></div>`).join('');
+        ? [
+            ['tickets', 'Tickets', activityRows.length],
+            ['customer_reverted', 'Customer Reverted', activityRows.filter((row) => row.customer_reverted).length],
+            ['overdue_replies', 'Overdue Replies', activityRows.filter((row) => row.reply_highlight === 'overdue').length],
+            ['waiting_replies', 'Waiting Replies', activityRows.filter((row) => row.reply_highlight === 'waiting').length],
+            ['tagged', 'Tagged', activityRows.filter((row) => row.has_customer_revert_tag).length],
+          ]
+        : [
+            ['tickets', 'Tickets', slaRows.length],
+            ['red_flags', 'Red Flags', slaRows.filter((row) => row.sla_red_flag).length],
+            ['at_risk', 'At Risk', slaRows.filter((row) => row.sla_amber_flag).length],
+            ['ack_breaches', 'Ack Breaches', slaRows.filter((row) => row.ack_state === 'breached').length],
+            ['resolution_breaches', 'Resolution Breaches', slaRows.filter((row) => row.resolution_state === 'breached').length],
+          ];
+      document.getElementById('cards').innerHTML = cards.map(([key, label, value]) => `<div class="card"><button class="card-button ${activeCardFilters[currentView] === key ? 'active' : ''}" type="button" data-card-filter="${key}"><div class="label">${label}</div><div class="value">${value ?? 0}</div></button></div>`).join('');
+      document.querySelectorAll('#cards [data-card-filter]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const nextFilter = button.getAttribute('data-card-filter') || 'tickets';
+          activeCardFilters[currentView] = activeCardFilters[currentView] === nextFilter ? 'tickets' : nextFilter;
+          render();
+        });
+      });
     }
     function render() {
+      const baseActivityRows = filteredRows('activity', false);
+      const baseSlaRows = filteredRows('sla', false);
       const activityRows = filteredRows('activity');
       const slaRows = filteredRows('sla');
-      renderCards(activityRows, slaRows);
+      renderCards(baseActivityRows, baseSlaRows);
       document.getElementById('activity-table-body').innerHTML = activityRows.map((row) => `
         <tr class="${row.reply_highlight}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Priority: ${escapeHtml(row.priority_label)} • Group: ${row.group_id || '-'} • Agent: ${escapeHtml(row.responder_name || String(row.responder_id || '-'))}</div></td><td>${escapeHtml(row.status_label)}</td><td>${escapeHtml(row.type || '')}</td><td>${escapeHtml(row.updated_at || '')}</td><td>${replyPill(row)}<div class="small">Current waiting: ${row.customer_reverted ? 'Yes' : 'No'}</div></td><td>${yesNoUnknown(row.customer_reverted_ever, row.conversation_checked)}<div class="small">At least one customer revert</div></td><td>${yesNoUnknown(row.replied_after_customer_revert, row.conversation_checked)}<div class="small">Reply after revert</div></td><td>${escapeHtml(row.tags_display || '')}</td><td><div><strong>${escapeHtml(row.last_activity_type || '')}</strong></div><div class="small">${escapeHtml(row.last_activity_at || '')}</div><div>${escapeHtml(row.last_activity_preview || '')}</div></td><td class="timeline">${escapeHtml(row.timeline_excerpt || '')}</td></tr>`).join('');
       document.getElementById('sla-table-body').innerHTML = slaRows.map((row) => `
@@ -1132,6 +1174,15 @@ def build_dashboard_html(
         });
       });
     }
+    function wireDatePicker(inputId) {
+      const input = document.getElementById(inputId);
+      if (!(input instanceof HTMLInputElement)) return;
+      const openPicker = () => {
+        if (typeof input.showPicker === 'function') input.showPicker();
+      };
+      input.addEventListener('focus', openPicker);
+      input.addEventListener('click', openPicker);
+    }
     function setView(view) {
       currentView = view;
       document.getElementById('activity-view').classList.toggle('hidden', view !== 'activity');
@@ -1152,6 +1203,7 @@ def build_dashboard_html(
     renderCheckboxGroup('sla-filter-sla', ['red_flag', 'ack_breached', 'resolution_breached', 'max_timeline_breached', 'at_risk'], 'All SLA flags');
     ['activity-filter-highlight','activity-filter-status','activity-filter-type','activity-filter-company','sla-filter-status','sla-filter-type','sla-filter-company','sla-filter-sla'].forEach(wireGroup);
     ['activity-filter-company','sla-filter-company'].forEach(wireFilterSearch);
+    ['activity-date-from','activity-date-to','sla-date-from','sla-date-to'].forEach(wireDatePicker);
     document.getElementById('activity-search').addEventListener('input', render);
     document.getElementById('sla-search').addEventListener('input', render);
     document.getElementById('activity-date-from').addEventListener('input', render);
