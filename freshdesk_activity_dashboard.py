@@ -36,6 +36,7 @@ PRIORITY_LABELS = {
     4: "Urgent",
 }
 CLOSED_STATUSES = {4, 5}
+HIGHLIGHTED_STATUSES = {2, 3}
 DEFAULT_OUTPUT_DIR = "dashboard"
 DEFAULT_REVERT_TAG = "customer_reverted"
 DEFAULT_ALL_TICKETS_SINCE = "1970-01-01"
@@ -417,6 +418,8 @@ def evaluate_deadline(
 def build_sla_metrics(ticket: Dict[str, object], row: Dict[str, object]) -> Dict[str, object]:
     priority_name = row.get("priority_label") or ""
     ticket_type = row.get("type") or ""
+    status_value = as_int(ticket.get("status")) or 0
+    highlight_enabled = status_value in HIGHLIGHTED_STATUSES
     rule = classify_sla_rule(ticket_type, priority_name)
     stats = ticket.get("stats") if isinstance(ticket.get("stats"), dict) else {}
     created_at = parse_iso(ticket.get("created_at"))
@@ -441,8 +444,17 @@ def build_sla_metrics(ticket: Dict[str, object], row: Dict[str, object]) -> Dict
         target_hours=rule.get("max_hours"),
     )
 
-    red_flag = ack_state == "breached" or resolution_state == "breached" or max_state == "breached"
-    amber_flag = (not red_flag) and (ack_state == "at_risk" or resolution_state == "at_risk" or max_state == "at_risk")
+    if not highlight_enabled:
+        ack_state, ack_label, ack_delta, ack_deadline = "na", "NA", None, "NA"
+        resolution_state, resolution_label, resolution_delta, resolution_deadline = "na", "NA", None, "NA"
+        max_state, max_label, max_delta, max_deadline = "na", "NA", None, "NA"
+
+    red_flag = highlight_enabled and (
+        ack_state == "breached" or resolution_state == "breached" or max_state == "breached"
+    )
+    amber_flag = highlight_enabled and (not red_flag) and (
+        ack_state == "at_risk" or resolution_state == "at_risk" or max_state == "at_risk"
+    )
 
     status_label_value = str(row.get("status_label") or "")
 
@@ -456,14 +468,14 @@ def build_sla_metrics(ticket: Dict[str, object], row: Dict[str, object]) -> Dict
         elif ticket_type in {"Bug", "Task - Backend"}:
             owner_team = "Customer Delight"
 
-    sop_action = "Monitor"
-    if max_state == "breached":
+    sop_action = "Closed" if not highlight_enabled else "Monitor"
+    if highlight_enabled and max_state == "breached":
         sop_action = "Escalate internally"
-    elif resolution_state == "breached" or ack_state == "breached":
+    elif highlight_enabled and (resolution_state == "breached" or ack_state == "breached"):
         sop_action = "Red flag and communicate delay"
-    elif "pending with client" in status_label_value.lower():
+    elif highlight_enabled and "pending with client" in status_label_value.lower():
         sop_action = "Send follow-up email"
-    elif rule.get("internal_review"):
+    elif highlight_enabled and rule.get("internal_review"):
         sop_action = "Internal feasibility review"
 
     return {
@@ -624,7 +636,7 @@ def build_activity_metrics(
         last_activity_user_name = timeline[-1].get("actor_name") or last_activity_user_name
         last_activity_preview = timeline[-1]["preview"] or "Conversation updated"
 
-    unresolved = as_int(ticket.get("status")) not in CLOSED_STATUSES
+    unresolved = as_int(ticket.get("status")) in HIGHLIGHTED_STATUSES
     customer_reverted = bool(
         unresolved
         and last_customer_reply_at
