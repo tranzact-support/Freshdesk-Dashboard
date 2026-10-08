@@ -1018,10 +1018,12 @@ def build_dashboard_html(
     .timeline { max-width:420px; white-space:pre-wrap; }
     .hidden { display:none; }
     .overview-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:16px; margin-top:16px; }
-    .overview-card, .chart-card, .action-card { background:#111827; border:1px solid #334155; border-radius:12px; padding:16px; }
-    .overview-card .label, .chart-card .label, .action-card .label { color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+    .overview-card, .chart-card { background:#111827; border:1px solid #334155; border-radius:12px; padding:16px; }
+    .overview-card .label, .chart-card .label, .attention-item .label { color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
     .overview-card .value { font-size:32px; font-weight:700; margin-top:8px; }
-    .overview-card .subvalue, .chart-card .subvalue, .action-card .subvalue { color:#94a3b8; font-size:12px; margin-top:8px; }
+    .overview-card .subvalue, .chart-card .subvalue { color:#94a3b8; font-size:12px; margin-top:8px; }
+    .overview-card-button { width:100%; border:0; background:transparent; color:inherit; text-align:left; padding:0; cursor:pointer; }
+    .overview-card.active { border-color:#2563eb; box-shadow: inset 0 0 0 1px #2563eb; }
     .overview-section { margin-top:18px; }
     .section-title { margin:0 0 12px; font-size:18px; }
     .overview-controls { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:12px 0 6px; }
@@ -1037,9 +1039,6 @@ def build_dashboard_html(
     .mini-row { display:grid; grid-template-columns: 150px 1fr auto; gap:12px; align-items:center; }
     .mini-track { background:#0b1220; border:1px solid #334155; border-radius:999px; overflow:hidden; height:12px; }
     .mini-fill { background:#2563eb; height:100%; }
-    .next-actions { display:grid; gap:12px; }
-    .next-action-title { font-weight:700; }
-    .next-action-meta { color:#94a3b8; font-size:12px; margin-top:4px; }
     .line-chart { margin-top:14px; }
     .line-chart svg { width:100%; height:220px; display:block; }
     .line-labels { display:flex; justify-content:space-between; gap:8px; color:#94a3b8; font-size:12px; margin-top:10px; }
@@ -1111,6 +1110,9 @@ def build_dashboard_html(
           <input class="date-input" id="overview-date-to" type="date" title="Overview to">
           <button type="button" id="overview-current-week">This Week</button>
           <button type="button" id="overview-last-week">Last Week</button>
+          <button type="button" id="overview-current-month">This Month</button>
+          <button type="button" id="overview-last-month">Last Month</button>
+          <details class="filter-box"><summary>Ticket Category</summary><div class="filter-list" id="overview-filter-type"></div></details>
         </div>
         <div class="overview-helper" id="overview-helper"></div>
         <div class="overview-grid" id="overview-metrics"></div>
@@ -1135,10 +1137,6 @@ def build_dashboard_html(
       <div class="overview-section">
         <h2 class="section-title">Needs Attention</h2>
         <div class="attention-list" id="overview-attention"></div>
-      </div>
-      <div class="overview-section">
-        <h2 class="section-title">Next Actions</h2>
-        <div class="next-actions" id="overview-actions"></div>
       </div>
     </div>
   </div>
@@ -1250,12 +1248,27 @@ def build_dashboard_html(
       }).join('');
       return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${grid}<path d="${pathFor(pointsA)}" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round"></path><path d="${pathFor(pointsB)}" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round"></path>${circlesFor(pointsA, '#2563eb')}${circlesFor(pointsB, '#22c55e')}</svg>`;
     }
+    function overviewMetricFilterRows(rowsToFilter, metricKey) {
+      if (!metricKey || metricKey === 'tickets') return rowsToFilter;
+      if (metricKey === 'tickets_this_week') return rowsToFilter;
+      if (metricKey === 'pending_sop') return rowsToFilter.filter((row) => row.sla_red_flag || row.sla_amber_flag || row.ack_state === 'breached' || row.resolution_state === 'breached' || row.max_timeline_state === 'breached');
+      if (metricKey === 'not_accepted') return rowsToFilter.filter((row) => ['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim()));
+      if (metricKey === 'customer_waiting') return rowsToFilter.filter((row) => row.reply_highlight === 'overdue' || row.reply_highlight === 'waiting');
+      if (metricKey === 'red_flags') return rowsToFilter.filter((row) => row.sla_red_flag);
+      if (metricKey === 'stuck') return rowsToFilter.filter((row) => {
+        const updatedAt = parseDate(row.updated_at || row.last_activity_at);
+        return updatedAt && ((Date.now() - updatedAt.getTime()) / 3600000) >= 48;
+      });
+      return rowsToFilter;
+    }
     function buildOverviewStats() {
       const { fromDate, toDate } = getOverviewDateRange();
       const weekDays = buildDailyBuckets(fromDate, toDate);
+      const selectedTypes = selectedValues('overview-filter-type');
       const inRangeRows = rows.filter((row) => {
         const createdAt = parseDate(row.created_at);
-        return createdAt && createdAt >= fromDate && createdAt <= toDate;
+        if (!(createdAt && createdAt >= fromDate && createdAt <= toDate)) return false;
+        return matchesMulti(row.type, selectedTypes);
       });
       const activeRows = inRangeRows.filter((row) => !isClosedLikeStatus(row.status_label));
       inRangeRows.forEach((row) => {
@@ -1285,7 +1298,8 @@ def build_dashboard_html(
         { key: 'red_flags', label: 'Red Flags', value: activeRows.filter((row) => row.sla_red_flag).length, detail: 'Open SLA breaches right now', action: 'Escalate breaches first and communicate ETAs.' },
         { key: 'stuck', label: 'Stuck 48h+', value: stalledRows.length, detail: 'No update for at least 48 hours', action: 'Review stale tickets and unblock owners immediately.' },
       ];
-      const attentionRows = activeRows.map((row) => {
+      const filteredAttentionSource = overviewMetricFilterRows(activeRows, activeCardFilters.overview);
+      const attentionRows = filteredAttentionSource.map((row) => {
         const updatedAt = parseDate(row.updated_at || row.last_activity_at);
         const staleHours = updatedAt ? Math.round((Date.now() - updatedAt.getTime()) / 3600000) : 0;
         let reason = '';
@@ -1297,17 +1311,26 @@ def build_dashboard_html(
         else if (row.sla_amber_flag) { reason = 'At risk of delay'; severity = 1; }
         return { row, staleHours, reason, severity };
       }).filter((item) => item.severity > 0).sort((left, right) => right.severity - left.severity || right.staleHours - left.staleHours).slice(0, 8);
-      return { weekDays, metrics, activeRows, attentionRows, fromDate, toDate };
+      return { weekDays, metrics, activeRows, attentionRows, fromDate, toDate, selectedTypes };
     }
     function renderOverview() {
       const overview = buildOverviewStats();
       document.getElementById('overview-helper').textContent = `Showing tickets created from ${formatDateInputValue(overview.fromDate)} to ${formatDateInputValue(overview.toDate)}.`;
       document.getElementById('overview-metrics').innerHTML = overview.metrics.map((metric) => `
-        <div class="overview-card">
-          <div class="label">${escapeHtml(metric.label)}</div>
-          <div class="value">${metric.value}</div>
-          <div class="subvalue">${escapeHtml(metric.detail)}</div>
+        <div class="overview-card ${activeCardFilters.overview === metric.key ? 'active' : ''}">
+          <button class="overview-card-button" type="button" data-overview-card="${metric.key}">
+            <div class="label">${escapeHtml(metric.label)}</div>
+            <div class="value">${metric.value}</div>
+            <div class="subvalue">${escapeHtml(metric.detail)}</div>
+          </button>
         </div>`).join('');
+      document.querySelectorAll('[data-overview-card]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const metricKey = button.getAttribute('data-overview-card') || 'tickets';
+          activeCardFilters.overview = activeCardFilters.overview === metricKey ? 'tickets' : metricKey;
+          render();
+        });
+      });
       const openedValues = overview.weekDays.map((item) => item.opened);
       const closedValues = overview.weekDays.map((item) => item.closed);
       const maxLineValue = Math.max(1, ...openedValues, ...closedValues);
@@ -1322,8 +1345,6 @@ def build_dashboard_html(
         const row = item.row;
         return `<div class="attention-item"><div class="attention-title"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">#${row.ticket_id}</a> — ${escapeHtml(row.subject)}</div><div class="attention-meta">Status: ${escapeHtml(row.status_label)} • Done By: ${escapeHtml(displayAgentName(row))} • Last updated: ${escapeHtml(row.updated_at_ist || row.last_activity_at_ist || '-')}</div><div class="attention-reason">${escapeHtml(item.reason)}</div></div>`;
       }).join('') || '<div class="attention-item"><div class="attention-title">No stuck or delayed tickets in this range</div><div class="attention-meta">Good sign — no immediate follow-up needed from this weekly view.</div></div>';
-      document.getElementById('overview-actions').innerHTML = overview.metrics.filter((metric) => metric.value > 0).map((metric) => `
-        <div class="action-card"><div class="label">${escapeHtml(metric.label)}</div><div class="next-action-title">${metric.value} ticket${metric.value === 1 ? '' : 's'}</div><div class="next-action-meta">${escapeHtml(metric.action)}</div></div>`).join('') || '<div class="action-card"><div class="label">Next Actions</div><div class="next-action-title">No immediate actions</div><div class="next-action-meta">Everything looks clear right now.</div></div>';
     }
     function renderCheckboxGroup(containerId, options, allLabel, searchable = false) {
       const container = document.getElementById(containerId);
@@ -1495,7 +1516,8 @@ def build_dashboard_html(
     renderCheckboxGroup('sla-filter-type', [...new Set(rows.map((row) => row.type).filter(Boolean))].sort(), 'All ticket categories');
     renderCheckboxGroup('sla-filter-company', [...new Set(rows.map((row) => row.company_name || 'Unknown').filter(Boolean))].sort(), 'All companies', true);
     renderCheckboxGroup('sla-filter-sla', ['red_flag', 'ack_breached', 'resolution_breached', 'max_timeline_breached', 'at_risk'], 'All SLA flags');
-    ['activity-filter-highlight','activity-filter-status','activity-filter-type','activity-filter-company','sla-filter-status','sla-filter-type','sla-filter-company','sla-filter-sla'].forEach(wireGroup);
+    renderCheckboxGroup('overview-filter-type', [...new Set(rows.map((row) => row.type).filter(Boolean))].sort(), 'All ticket categories');
+    ['activity-filter-highlight','activity-filter-status','activity-filter-type','activity-filter-company','sla-filter-status','sla-filter-type','sla-filter-company','sla-filter-sla','overview-filter-type'].forEach(wireGroup);
     ['activity-filter-company','sla-filter-company'].forEach(wireFilterSearch);
     ['activity-date-from','activity-date-to','sla-date-from','sla-date-to','overview-date-from','overview-date-to'].forEach(wireDatePicker);
     document.getElementById('activity-search').addEventListener('input', render);
@@ -1518,6 +1540,22 @@ def build_dashboard_html(
       const lastWeekStart = startOfWeek(lastWeekEnd);
       document.getElementById('overview-date-from').value = formatDateInputValue(lastWeekStart);
       document.getElementById('overview-date-to').value = formatDateInputValue(endOfWeek(lastWeekStart));
+      render();
+    });
+    document.getElementById('overview-current-month').addEventListener('click', () => {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      document.getElementById('overview-date-from').value = formatDateInputValue(start);
+      document.getElementById('overview-date-to').value = formatDateInputValue(end);
+      render();
+    });
+    document.getElementById('overview-last-month').addEventListener('click', () => {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0);
+      document.getElementById('overview-date-from').value = formatDateInputValue(start);
+      document.getElementById('overview-date-to').value = formatDateInputValue(end);
       render();
     });
     document.getElementById('tab-activity').addEventListener('click', () => setView('activity'));
