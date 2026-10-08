@@ -361,6 +361,11 @@ def normalize_ticket_type(value: object) -> str:
     return TICKET_TYPE_ALIASES.get(ticket_type, ticket_type)
 
 
+def is_agent_id_label(value: object) -> bool:
+    text = str(value or "").strip()
+    return bool(re.fullmatch(r"Agent ID\s+\d+", text))
+
+
 def is_highlightable_status(status_value: object, status_label_value: object = "") -> bool:
     numeric = as_int(status_value)
     if numeric in CLOSED_STATUSES:
@@ -804,6 +809,14 @@ def build_row(
     }
     row.update(metrics)
     row.update(build_sla_metrics(ticket, row))
+    previous_responder_name = str((previous_row or {}).get("responder_name") or "").strip()
+    if not row["responder_name"] and previous_responder_name:
+        row["responder_name"] = previous_responder_name
+    previous_last_actor = str((previous_row or {}).get("last_activity_user_name") or "").strip()
+    if not row["responder_name"] and previous_last_actor and not is_agent_id_label(previous_last_actor):
+        row["responder_name"] = previous_last_actor
+    if is_agent_id_label(row.get("last_activity_user_name")) and row["responder_name"]:
+        row["last_activity_user_name"] = row["responder_name"]
     if not is_highlightable_status(row.get("status"), row.get("status_label")):
         row["customer_reverted"] = False
         row["reply_age_hours"] = None
@@ -1004,6 +1017,27 @@ def build_dashboard_html(
     .id a { color:#93c5fd; text-decoration:none; }
     .timeline { max-width:420px; white-space:pre-wrap; }
     .hidden { display:none; }
+    .overview-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:16px; margin-top:16px; }
+    .overview-card, .chart-card, .action-card { background:#111827; border:1px solid #334155; border-radius:12px; padding:16px; }
+    .overview-card .label, .chart-card .label, .action-card .label { color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+    .overview-card .value { font-size:32px; font-weight:700; margin-top:8px; }
+    .overview-card .subvalue, .chart-card .subvalue, .action-card .subvalue { color:#94a3b8; font-size:12px; margin-top:8px; }
+    .overview-section { margin-top:18px; }
+    .section-title { margin:0 0 12px; font-size:18px; }
+    .bar-chart { display:flex; align-items:flex-end; gap:10px; min-height:220px; padding-top:12px; }
+    .bar-group { flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; }
+    .bar-stack { width:100%; max-width:56px; min-height:180px; display:flex; align-items:flex-end; }
+    .bar { width:100%; border-radius:10px 10px 0 0; background:#2563eb; min-height:6px; }
+    .bar.secondary { background:#7c3aed; }
+    .bar-label { color:#94a3b8; font-size:12px; text-align:center; }
+    .bar-value { font-size:12px; color:#e2e8f0; }
+    .mini-bars { display:grid; gap:12px; margin-top:12px; }
+    .mini-row { display:grid; grid-template-columns: 150px 1fr auto; gap:12px; align-items:center; }
+    .mini-track { background:#0b1220; border:1px solid #334155; border-radius:999px; overflow:hidden; height:12px; }
+    .mini-fill { background:#2563eb; height:100%; }
+    .next-actions { display:grid; gap:12px; }
+    .next-action-title { font-weight:700; }
+    .next-action-meta { color:#94a3b8; font-size:12px; margin-top:4px; }
   </style>
 </head>
 <body>
@@ -1023,6 +1057,7 @@ def build_dashboard_html(
     <div class="tabs">
       <button class="tab-btn active" id="tab-activity">Activity</button>
       <button class="tab-btn" id="tab-sla">SOP / SLA</button>
+      <button class="tab-btn" id="tab-overview">Overview</button>
     </div>
     <div class="cards" id="cards"></div>
     <div id="activity-view">
@@ -1042,7 +1077,7 @@ def build_dashboard_html(
     </div>
     <div id="sla-view" class="hidden">
       <div class="controls">
-        <input id="sla-search" type="search" placeholder="Search subject, category, action, ticket id">
+        <input id="sla-search" type="search" placeholder="Search subject, category, ticket id">
         <input class="date-input" id="sla-date-from" type="date" title="Created from">
         <input class="date-input" id="sla-date-to" type="date" title="Created to">
         <details class="filter-box"><summary>Status</summary><div class="filter-list" id="sla-filter-status"></div></details>
@@ -1055,14 +1090,138 @@ def build_dashboard_html(
         <tbody id="sla-table-body"></tbody>
       </table>
     </div>
+    <div id="overview-view" class="hidden">
+      <div class="overview-section">
+        <h2 class="section-title">Quick Look</h2>
+        <div class="overview-grid" id="overview-metrics"></div>
+      </div>
+      <div class="overview-section">
+        <h2 class="section-title">Graphs</h2>
+        <div class="overview-grid">
+          <div class="chart-card">
+            <div class="label">Tickets This Week</div>
+            <div class="subvalue">Created in the current week</div>
+            <div class="bar-chart" id="weekly-created-chart"></div>
+          </div>
+          <div class="chart-card">
+            <div class="label">Operational Snapshot</div>
+            <div class="subvalue">Current workload by action area</div>
+            <div class="mini-bars" id="overview-category-bars"></div>
+          </div>
+        </div>
+      </div>
+      <div class="overview-section">
+        <h2 class="section-title">Next Actions</h2>
+        <div class="next-actions" id="overview-actions"></div>
+      </div>
+    </div>
   </div>
   <script>
     const data = __DATA__;
     const summary = data.summary || {};
     const rows = data.rows || [];
     let currentView = 'activity';
-    const activeCardFilters = { activity: 'tickets', sla: 'tickets' };
+    const activeCardFilters = { activity: 'tickets', sla: 'tickets', overview: 'tickets' };
+    const agentNamesByResponderId = rows.reduce((acc, row) => {
+      const responderId = Number(row.responder_id || 0);
+      const responderName = String(row.responder_name || '').trim();
+      const lastActor = String(row.last_activity_user_name || '').trim();
+      if (responderId && responderName) acc[responderId] = responderName;
+      else if (responderId && lastActor && !/^Agent ID\s+\d+$/.test(lastActor)) acc[responderId] = lastActor;
+      return acc;
+    }, {});
     function escapeHtml(text) { return String(text || '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'); }
+    function displayAgentName(row) {
+      const currentName = String(row.last_activity_user_name || '').trim();
+      if (currentName && !/^Agent ID\s+\d+$/.test(currentName)) return currentName;
+      const responderName = String(row.responder_name || '').trim();
+      if (responderName) return responderName;
+      const responderId = Number(row.responder_id || 0);
+      if (responderId && agentNamesByResponderId[responderId]) return agentNamesByResponderId[responderId];
+      return currentName || 'Unassigned';
+    }
+    function parseDate(value) {
+      const parsed = new Date(value || '');
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    function startOfWeek(date) {
+      const current = new Date(date);
+      current.setHours(0, 0, 0, 0);
+      const day = current.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      current.setDate(current.getDate() + diff);
+      return current;
+    }
+    function addDays(date, days) {
+      const next = new Date(date);
+      next.setDate(next.getDate() + days);
+      return next;
+    }
+    function isRejectedStatus(label) {
+      return String(label || '').toLowerCase().includes('reject');
+    }
+    function isClosedLikeStatus(label) {
+      const normalized = String(label || '').trim().toLowerCase();
+      return normalized === 'closed' || normalized === 'resolved' || isRejectedStatus(normalized);
+    }
+    function buildOverviewStats() {
+      const now = new Date();
+      const weekStart = startOfWeek(now);
+      const weekDays = Array.from({ length: 7 }, (_, index) => {
+        const date = addDays(weekStart, index);
+        return {
+          key: date.toISOString().slice(0, 10),
+          label: date.toLocaleDateString(undefined, { weekday: 'short' }),
+          total: 0,
+        };
+      });
+      const activeRows = rows.filter((row) => !isClosedLikeStatus(row.status_label));
+      rows.forEach((row) => {
+        const createdAt = parseDate(row.created_at);
+        if (!createdAt) return;
+        if (createdAt >= weekStart && createdAt < addDays(weekStart, 7)) {
+          const key = createdAt.toISOString().slice(0, 10);
+          const bucket = weekDays.find((item) => item.key === key);
+          if (bucket) bucket.total += 1;
+        }
+      });
+      const pendingSop = activeRows.filter((row) => row.sla_red_flag || row.sla_amber_flag || row.ack_state === 'breached' || row.resolution_state === 'breached' || row.max_timeline_state === 'breached');
+      const notAcceptedByTech = activeRows.filter((row) => ['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim()));
+      const customerWaiting = activeRows.filter((row) => row.reply_highlight === 'overdue' || row.reply_highlight === 'waiting');
+      const unresolvedThisWeek = rows.filter((row) => {
+        const createdAt = parseDate(row.created_at);
+        return createdAt && createdAt >= weekStart && createdAt < addDays(weekStart, 7) && !isClosedLikeStatus(row.status_label);
+      });
+      const metrics = [
+        { key: 'tickets_this_week', label: 'Tickets This Week', value: weekDays.reduce((sum, item) => sum + item.total, 0), detail: `${unresolvedThisWeek.length} still active`, action: 'Review new tickets created this week and assign owners.' },
+        { key: 'pending_sop', label: 'SOP Pending', value: pendingSop.length, detail: `${activeRows.length} active tickets in queue`, action: 'Start with red flags, then clear at-risk tickets.' },
+        { key: 'not_accepted', label: 'Not Accepted By Tech', value: notAcceptedByTech.length, detail: 'Pending At Tech or To be Picked in Next TS', action: 'Push tech acceptance or move to the correct owner/team.' },
+        { key: 'customer_waiting', label: 'Customer Waiting', value: customerWaiting.length, detail: 'Reply needed on the same ticket', action: 'Reply on the ticket or share a delay update with the customer.' },
+        { key: 'red_flags', label: 'Red Flags', value: activeRows.filter((row) => row.sla_red_flag).length, detail: 'Open SLA breaches right now', action: 'Escalate breaches first and communicate ETAs.' },
+      ];
+      return { weekDays, metrics, activeRows };
+    }
+    function renderOverview() {
+      const overview = buildOverviewStats();
+      document.getElementById('overview-metrics').innerHTML = overview.metrics.map((metric) => `
+        <div class="overview-card">
+          <div class="label">${escapeHtml(metric.label)}</div>
+          <div class="value">${metric.value}</div>
+          <div class="subvalue">${escapeHtml(metric.detail)}</div>
+        </div>`).join('');
+      const maxWeeklyValue = Math.max(1, ...overview.weekDays.map((item) => item.total));
+      document.getElementById('weekly-created-chart').innerHTML = overview.weekDays.map((item) => {
+        const height = Math.max(6, Math.round((item.total / maxWeeklyValue) * 180));
+        return `<div class="bar-group"><div class="bar-value">${item.total}</div><div class="bar-stack"><div class="bar" style="height:${height}px"></div></div><div class="bar-label">${escapeHtml(item.label)}</div></div>`;
+      }).join('');
+      const maxMetricValue = Math.max(1, ...overview.metrics.map((metric) => metric.value));
+      document.getElementById('overview-category-bars').innerHTML = overview.metrics.map((metric) => {
+        const width = Math.max(2, Math.round((metric.value / maxMetricValue) * 100));
+        return `<div class="mini-row"><div>${escapeHtml(metric.label)}</div><div class="mini-track"><div class="mini-fill" style="width:${width}%"></div></div><div>${metric.value}</div></div>`;
+      }).join('');
+      document.getElementById('overview-actions').innerHTML = overview.metrics.filter((metric) => metric.value > 0).map((metric) => `
+        <div class="action-card"><div class="label">${escapeHtml(metric.label)}</div><div class="next-action-title">${metric.value} ticket${metric.value === 1 ? '' : 's'}</div><div class="next-action-meta">${escapeHtml(metric.action)}</div></div>`).join('') || '<div class="action-card"><div class="label">Next Actions</div><div class="next-action-title">No immediate actions</div><div class="next-action-meta">Everything looks clear right now.</div></div>';
+    }
     function renderCheckboxGroup(containerId, options, allLabel, searchable = false) {
       const container = document.getElementById(containerId);
       const searchHtml = searchable ? `<input class="filter-search" type="search" placeholder="Search..." data-filter-search="${containerId}">` : '';
@@ -1140,6 +1299,10 @@ def build_dashboard_html(
       });
     }
     function renderCards(activityRows, slaRows) {
+      if (currentView === 'overview') {
+        document.getElementById('cards').innerHTML = '';
+        return;
+      }
       const cards = currentView === 'activity'
         ? [
             ['tickets', 'Tickets', activityRows.length],
@@ -1170,10 +1333,11 @@ def build_dashboard_html(
       const activityRows = filteredRows('activity');
       const slaRows = filteredRows('sla');
       renderCards(baseActivityRows, baseSlaRows);
+      renderOverview();
       document.getElementById('activity-table-body').innerHTML = activityRows.map((row) => `
         <tr class="${row.reply_highlight}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Priority: ${escapeHtml(row.priority_label)} • Group: ${row.group_id || '-'} • Agent: ${escapeHtml(row.responder_name || String(row.responder_id || '-'))}</div></td><td>${escapeHtml(row.status_label)}</td><td>${escapeHtml(row.type || '')}</td><td>${escapeHtml(row.updated_at || '')}</td><td>${replyPill(row)}<div class="small">Current waiting: ${row.customer_reverted ? 'Yes' : 'No'}</div></td><td>${yesNoUnknown(row.customer_reverted_ever, row.conversation_checked)}<div class="small">At least one customer revert</div></td><td>${yesNoUnknown(row.replied_after_customer_revert, row.conversation_checked)}<div class="small">Reply after revert</div></td><td>${escapeHtml(row.tags_display || '')}</td><td><div><strong>${escapeHtml(row.last_activity_type || '')}</strong></div><div class="small">${escapeHtml(row.last_activity_at || '')}</div><div>${escapeHtml(row.last_activity_preview || '')}</div></td><td class="timeline">${escapeHtml(row.timeline_excerpt || '')}</td></tr>`).join('');
       document.getElementById('sla-table-body').innerHTML = slaRows.map((row) => `
-        <tr class="${row.sla_red_flag ? 'sla-red' : row.sla_amber_flag ? 'sla-amber' : ''}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Status: ${escapeHtml(row.status_label)} • Type: ${escapeHtml(row.type || '')}</div></td><td>${escapeHtml(row.sla_category || '')}</td><td>${escapeHtml(row.priority_label || '')}</td><td>${escapeHtml(row.created_at_ist || '')}</td><td>${escapeHtml(row.closed_at_ist || row.resolved_at_ist || '') || '<span class="small">Open</span>'}</td><td><div>${escapeHtml(row.last_activity_at_ist || '')}</div><div class="small">${escapeHtml(row.last_activity_type || '')}</div></td><td>${escapeHtml(row.last_activity_user_name || '')}</td><td>${slaPill(row.ack_state, row.ack_label)}<div class="small">SLA: ${escapeHtml(row.ack_sla || 'NA')}</div></td><td>${slaPill(row.resolution_state, row.resolution_label)}<div class="small">SLA: ${escapeHtml(row.resolution_sla || 'NA')}</div></td><td>${slaPill(row.max_timeline_state, row.max_timeline_label)}<div class="small">Limit: ${escapeHtml(row.max_timeline_sla || 'NA')}</div></td><td>${escapeHtml(row.owner_team || '')}</td></tr>`).join('');
+        <tr class="${row.sla_red_flag ? 'sla-red' : row.sla_amber_flag ? 'sla-amber' : ''}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Status: ${escapeHtml(row.status_label)} • Type: ${escapeHtml(row.type || '')}</div></td><td>${escapeHtml(row.sla_category || '')}</td><td>${escapeHtml(row.priority_label || '')}</td><td>${escapeHtml(row.created_at_ist || '')}</td><td>${escapeHtml(row.closed_at_ist || row.resolved_at_ist || '') || '<span class="small">Open</span>'}</td><td><div>${escapeHtml(row.last_activity_at_ist || '')}</div><div class="small">${escapeHtml(row.last_activity_type || '')}</div></td><td>${escapeHtml(displayAgentName(row))}</td><td>${slaPill(row.ack_state, row.ack_label)}<div class="small">SLA: ${escapeHtml(row.ack_sla || 'NA')}</div></td><td>${slaPill(row.resolution_state, row.resolution_label)}<div class="small">SLA: ${escapeHtml(row.resolution_sla || 'NA')}</div></td><td>${slaPill(row.max_timeline_state, row.max_timeline_label)}<div class="small">Limit: ${escapeHtml(row.max_timeline_sla || 'NA')}</div></td><td>${escapeHtml(row.owner_team || '')}</td></tr>`).join('');
     }
     function wireGroup(containerId) {
       document.getElementById(containerId).addEventListener('change', (event) => {
@@ -1212,8 +1376,10 @@ def build_dashboard_html(
       currentView = view;
       document.getElementById('activity-view').classList.toggle('hidden', view !== 'activity');
       document.getElementById('sla-view').classList.toggle('hidden', view !== 'sla');
+      document.getElementById('overview-view').classList.toggle('hidden', view !== 'overview');
       document.getElementById('tab-activity').classList.toggle('active', view === 'activity');
       document.getElementById('tab-sla').classList.toggle('active', view === 'sla');
+      document.getElementById('tab-overview').classList.toggle('active', view === 'overview');
       render();
     }
     document.getElementById('meta').textContent = `Updated since ${summary.updated_since} • Generated at ${summary.generated_at} • Total tickets ${summary.total_tickets}`;
@@ -1237,6 +1403,7 @@ def build_dashboard_html(
     document.getElementById('sla-date-to').addEventListener('input', render);
     document.getElementById('tab-activity').addEventListener('click', () => setView('activity'));
     document.getElementById('tab-sla').addEventListener('click', () => setView('sla'));
+    document.getElementById('tab-overview').addEventListener('click', () => setView('overview'));
     __REFRESH_JS__
     setView('activity');
   </script>
