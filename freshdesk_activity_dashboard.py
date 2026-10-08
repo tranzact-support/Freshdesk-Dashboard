@@ -1024,6 +1024,8 @@ def build_dashboard_html(
     .overview-card .subvalue, .chart-card .subvalue, .action-card .subvalue { color:#94a3b8; font-size:12px; margin-top:8px; }
     .overview-section { margin-top:18px; }
     .section-title { margin:0 0 12px; font-size:18px; }
+    .overview-controls { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:12px 0 6px; }
+    .overview-helper { color:#94a3b8; font-size:12px; margin-top:4px; }
     .bar-chart { display:flex; align-items:flex-end; gap:10px; min-height:220px; padding-top:12px; }
     .bar-group { flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; }
     .bar-stack { width:100%; max-width:56px; min-height:180px; display:flex; align-items:flex-end; }
@@ -1038,6 +1040,17 @@ def build_dashboard_html(
     .next-actions { display:grid; gap:12px; }
     .next-action-title { font-weight:700; }
     .next-action-meta { color:#94a3b8; font-size:12px; margin-top:4px; }
+    .line-chart { margin-top:14px; }
+    .line-chart svg { width:100%; height:220px; display:block; }
+    .line-labels { display:flex; justify-content:space-between; gap:8px; color:#94a3b8; font-size:12px; margin-top:10px; }
+    .line-legend { display:flex; gap:12px; flex-wrap:wrap; margin-top:10px; color:#cbd5e1; font-size:12px; }
+    .legend-dot { width:10px; height:10px; border-radius:999px; display:inline-block; margin-right:6px; }
+    .attention-list { display:grid; gap:12px; }
+    .attention-item { background:#111827; border:1px solid #334155; border-radius:12px; padding:14px; }
+    .attention-item a { color:#93c5fd; text-decoration:none; }
+    .attention-title { font-weight:700; }
+    .attention-meta { color:#94a3b8; font-size:12px; margin-top:4px; }
+    .attention-reason { margin-top:8px; font-size:13px; }
   </style>
 </head>
 <body>
@@ -1093,22 +1106,35 @@ def build_dashboard_html(
     <div id="overview-view" class="hidden">
       <div class="overview-section">
         <h2 class="section-title">Quick Look</h2>
+        <div class="overview-controls">
+          <input class="date-input" id="overview-date-from" type="date" title="Overview from">
+          <input class="date-input" id="overview-date-to" type="date" title="Overview to">
+          <button type="button" id="overview-current-week">This Week</button>
+          <button type="button" id="overview-last-week">Last Week</button>
+        </div>
+        <div class="overview-helper" id="overview-helper"></div>
         <div class="overview-grid" id="overview-metrics"></div>
       </div>
       <div class="overview-section">
         <h2 class="section-title">Graphs</h2>
         <div class="overview-grid">
           <div class="chart-card">
-            <div class="label">Tickets This Week</div>
-            <div class="subvalue">Created in the current week</div>
-            <div class="bar-chart" id="weekly-created-chart"></div>
+            <div class="label">Opened vs Closed</div>
+            <div class="subvalue">Daily weekly trend inside the selected range</div>
+            <div class="line-chart" id="weekly-open-close-chart"></div>
+            <div class="line-labels" id="weekly-open-close-labels"></div>
+            <div class="line-legend"><span><span class="legend-dot" style="background:#2563eb"></span>Opened</span><span><span class="legend-dot" style="background:#22c55e"></span>Closed / Resolved</span></div>
           </div>
           <div class="chart-card">
-            <div class="label">Operational Snapshot</div>
-            <div class="subvalue">Current workload by action area</div>
+            <div class="label">Weekly Queue Snapshot</div>
+            <div class="subvalue">Active tickets created in the selected range</div>
             <div class="mini-bars" id="overview-category-bars"></div>
           </div>
         </div>
+      </div>
+      <div class="overview-section">
+        <h2 class="section-title">Needs Attention</h2>
+        <div class="attention-list" id="overview-attention"></div>
       </div>
       <div class="overview-section">
         <h2 class="section-title">Next Actions</h2>
@@ -1144,6 +1170,9 @@ def build_dashboard_html(
       const parsed = new Date(value || '');
       return Number.isNaN(parsed.getTime()) ? null : parsed;
     }
+    function formatDateInputValue(date) {
+      return date.toISOString().slice(0, 10);
+    }
     function startOfWeek(date) {
       const current = new Date(date);
       current.setHours(0, 0, 0, 0);
@@ -1157,6 +1186,11 @@ def build_dashboard_html(
       next.setDate(next.getDate() + days);
       return next;
     }
+    function endOfWeek(date) {
+      const end = addDays(startOfWeek(date), 6);
+      end.setHours(23, 59, 59, 999);
+      return end;
+    }
     function isRejectedStatus(label) {
       return String(label || '').toLowerCase().includes('reject');
     }
@@ -1164,61 +1198,130 @@ def build_dashboard_html(
       const normalized = String(label || '').trim().toLowerCase();
       return normalized === 'closed' || normalized === 'resolved' || isRejectedStatus(normalized);
     }
+    function getOverviewDateRange() {
+      const fromInput = document.getElementById('overview-date-from');
+      const toInput = document.getElementById('overview-date-to');
+      let fromDate = parseDate(fromInput.value);
+      let toDate = parseDate(toInput.value);
+      if (!fromDate || !toDate) {
+        const now = new Date();
+        fromDate = startOfWeek(now);
+        toDate = endOfWeek(now);
+      }
+      if (fromDate > toDate) {
+        const swap = fromDate;
+        fromDate = toDate;
+        toDate = swap;
+      }
+      fromDate.setHours(0, 0, 0, 0);
+      toDate.setHours(23, 59, 59, 999);
+      return { fromDate, toDate };
+    }
+    function buildDailyBuckets(fromDate, toDate) {
+      const buckets = [];
+      const cursor = new Date(fromDate);
+      cursor.setHours(0, 0, 0, 0);
+      while (cursor <= toDate) {
+        buckets.push({
+          key: formatDateInputValue(cursor),
+          label: cursor.toLocaleDateString(undefined, { weekday: 'short' }),
+          fullLabel: cursor.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+          opened: 0,
+          closed: 0,
+        });
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return buckets;
+    }
+    function buildLineChartSvg(pointsA, pointsB, maxValue) {
+      const width = 640;
+      const height = 220;
+      const padding = 20;
+      const chartHeight = height - (padding * 2);
+      const chartWidth = width - (padding * 2);
+      const pointGap = pointsA.length > 1 ? chartWidth / (pointsA.length - 1) : 0;
+      const toY = (value) => height - padding - ((value / Math.max(1, maxValue)) * chartHeight);
+      const toX = (index) => padding + (pointGap * index);
+      const pathFor = (points) => points.map((value, index) => `${index === 0 ? 'M' : 'L'} ${toX(index).toFixed(1)} ${toY(value).toFixed(1)}`).join(' ');
+      const circlesFor = (points, color) => points.map((value, index) => `<circle cx="${toX(index).toFixed(1)}" cy="${toY(value).toFixed(1)}" r="4" fill="${color}"></circle>`).join('');
+      const grid = Array.from({ length: 4 }, (_, index) => {
+        const y = padding + ((chartHeight / 3) * index);
+        return `<line x1="${padding}" y1="${y.toFixed(1)}" x2="${(width - padding).toFixed(1)}" y2="${y.toFixed(1)}" stroke="#334155" stroke-width="1"></line>`;
+      }).join('');
+      return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${grid}<path d="${pathFor(pointsA)}" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round"></path><path d="${pathFor(pointsB)}" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round"></path>${circlesFor(pointsA, '#2563eb')}${circlesFor(pointsB, '#22c55e')}</svg>`;
+    }
     function buildOverviewStats() {
-      const now = new Date();
-      const weekStart = startOfWeek(now);
-      const weekDays = Array.from({ length: 7 }, (_, index) => {
-        const date = addDays(weekStart, index);
-        return {
-          key: date.toISOString().slice(0, 10),
-          label: date.toLocaleDateString(undefined, { weekday: 'short' }),
-          total: 0,
-        };
+      const { fromDate, toDate } = getOverviewDateRange();
+      const weekDays = buildDailyBuckets(fromDate, toDate);
+      const inRangeRows = rows.filter((row) => {
+        const createdAt = parseDate(row.created_at);
+        return createdAt && createdAt >= fromDate && createdAt <= toDate;
       });
-      const activeRows = rows.filter((row) => !isClosedLikeStatus(row.status_label));
-      rows.forEach((row) => {
+      const activeRows = inRangeRows.filter((row) => !isClosedLikeStatus(row.status_label));
+      inRangeRows.forEach((row) => {
         const createdAt = parseDate(row.created_at);
         if (!createdAt) return;
-        if (createdAt >= weekStart && createdAt < addDays(weekStart, 7)) {
-          const key = createdAt.toISOString().slice(0, 10);
-          const bucket = weekDays.find((item) => item.key === key);
-          if (bucket) bucket.total += 1;
+        const bucket = weekDays.find((item) => item.key === formatDateInputValue(createdAt));
+        if (bucket) bucket.opened += 1;
+        const closedAt = parseDate(row.closed_at || row.resolved_at);
+        if (closedAt && closedAt >= fromDate && closedAt <= toDate) {
+          const closedBucket = weekDays.find((item) => item.key === formatDateInputValue(closedAt));
+          if (closedBucket) closedBucket.closed += 1;
         }
       });
       const pendingSop = activeRows.filter((row) => row.sla_red_flag || row.sla_amber_flag || row.ack_state === 'breached' || row.resolution_state === 'breached' || row.max_timeline_state === 'breached');
       const notAcceptedByTech = activeRows.filter((row) => ['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim()));
       const customerWaiting = activeRows.filter((row) => row.reply_highlight === 'overdue' || row.reply_highlight === 'waiting');
-      const unresolvedThisWeek = rows.filter((row) => {
-        const createdAt = parseDate(row.created_at);
-        return createdAt && createdAt >= weekStart && createdAt < addDays(weekStart, 7) && !isClosedLikeStatus(row.status_label);
+      const stalledRows = activeRows.filter((row) => {
+        const updatedAt = parseDate(row.updated_at || row.last_activity_at);
+        if (!updatedAt) return false;
+        return ((Date.now() - updatedAt.getTime()) / 3600000) >= 48;
       });
       const metrics = [
-        { key: 'tickets_this_week', label: 'Tickets This Week', value: weekDays.reduce((sum, item) => sum + item.total, 0), detail: `${unresolvedThisWeek.length} still active`, action: 'Review new tickets created this week and assign owners.' },
+        { key: 'tickets_this_week', label: 'Tickets In Range', value: inRangeRows.length, detail: `${activeRows.length} still active`, action: 'Review newly created tickets in this range and assign owners.' },
         { key: 'pending_sop', label: 'SOP Pending', value: pendingSop.length, detail: `${activeRows.length} active tickets in queue`, action: 'Start with red flags, then clear at-risk tickets.' },
         { key: 'not_accepted', label: 'Not Accepted By Tech', value: notAcceptedByTech.length, detail: 'Pending At Tech or To be Picked in Next TS', action: 'Push tech acceptance or move to the correct owner/team.' },
         { key: 'customer_waiting', label: 'Customer Waiting', value: customerWaiting.length, detail: 'Reply needed on the same ticket', action: 'Reply on the ticket or share a delay update with the customer.' },
         { key: 'red_flags', label: 'Red Flags', value: activeRows.filter((row) => row.sla_red_flag).length, detail: 'Open SLA breaches right now', action: 'Escalate breaches first and communicate ETAs.' },
+        { key: 'stuck', label: 'Stuck 48h+', value: stalledRows.length, detail: 'No update for at least 48 hours', action: 'Review stale tickets and unblock owners immediately.' },
       ];
-      return { weekDays, metrics, activeRows };
+      const attentionRows = activeRows.map((row) => {
+        const updatedAt = parseDate(row.updated_at || row.last_activity_at);
+        const staleHours = updatedAt ? Math.round((Date.now() - updatedAt.getTime()) / 3600000) : 0;
+        let reason = '';
+        let severity = 0;
+        if (row.sla_red_flag) { reason = 'SLA red flag'; severity = 5; }
+        else if (row.reply_highlight === 'overdue') { reason = 'Customer waiting too long'; severity = 4; }
+        else if (['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim())) { reason = 'Awaiting tech acceptance'; severity = 3; }
+        else if (staleHours >= 48) { reason = `No update for ${staleHours}h`; severity = 2; }
+        else if (row.sla_amber_flag) { reason = 'At risk of delay'; severity = 1; }
+        return { row, staleHours, reason, severity };
+      }).filter((item) => item.severity > 0).sort((left, right) => right.severity - left.severity || right.staleHours - left.staleHours).slice(0, 8);
+      return { weekDays, metrics, activeRows, attentionRows, fromDate, toDate };
     }
     function renderOverview() {
       const overview = buildOverviewStats();
+      document.getElementById('overview-helper').textContent = `Showing tickets created from ${formatDateInputValue(overview.fromDate)} to ${formatDateInputValue(overview.toDate)}.`;
       document.getElementById('overview-metrics').innerHTML = overview.metrics.map((metric) => `
         <div class="overview-card">
           <div class="label">${escapeHtml(metric.label)}</div>
           <div class="value">${metric.value}</div>
           <div class="subvalue">${escapeHtml(metric.detail)}</div>
         </div>`).join('');
-      const maxWeeklyValue = Math.max(1, ...overview.weekDays.map((item) => item.total));
-      document.getElementById('weekly-created-chart').innerHTML = overview.weekDays.map((item) => {
-        const height = Math.max(6, Math.round((item.total / maxWeeklyValue) * 180));
-        return `<div class="bar-group"><div class="bar-value">${item.total}</div><div class="bar-stack"><div class="bar" style="height:${height}px"></div></div><div class="bar-label">${escapeHtml(item.label)}</div></div>`;
-      }).join('');
+      const openedValues = overview.weekDays.map((item) => item.opened);
+      const closedValues = overview.weekDays.map((item) => item.closed);
+      const maxLineValue = Math.max(1, ...openedValues, ...closedValues);
+      document.getElementById('weekly-open-close-chart').innerHTML = buildLineChartSvg(openedValues, closedValues, maxLineValue);
+      document.getElementById('weekly-open-close-labels').innerHTML = overview.weekDays.map((item) => `<span>${escapeHtml(item.label)}<br>${escapeHtml(item.fullLabel)}</span>`).join('');
       const maxMetricValue = Math.max(1, ...overview.metrics.map((metric) => metric.value));
       document.getElementById('overview-category-bars').innerHTML = overview.metrics.map((metric) => {
         const width = Math.max(2, Math.round((metric.value / maxMetricValue) * 100));
         return `<div class="mini-row"><div>${escapeHtml(metric.label)}</div><div class="mini-track"><div class="mini-fill" style="width:${width}%"></div></div><div>${metric.value}</div></div>`;
       }).join('');
+      document.getElementById('overview-attention').innerHTML = overview.attentionRows.map((item) => {
+        const row = item.row;
+        return `<div class="attention-item"><div class="attention-title"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">#${row.ticket_id}</a> — ${escapeHtml(row.subject)}</div><div class="attention-meta">Status: ${escapeHtml(row.status_label)} • Done By: ${escapeHtml(displayAgentName(row))} • Last updated: ${escapeHtml(row.updated_at_ist || row.last_activity_at_ist || '-')}</div><div class="attention-reason">${escapeHtml(item.reason)}</div></div>`;
+      }).join('') || '<div class="attention-item"><div class="attention-title">No stuck or delayed tickets in this range</div><div class="attention-meta">Good sign — no immediate follow-up needed from this weekly view.</div></div>';
       document.getElementById('overview-actions').innerHTML = overview.metrics.filter((metric) => metric.value > 0).map((metric) => `
         <div class="action-card"><div class="label">${escapeHtml(metric.label)}</div><div class="next-action-title">${metric.value} ticket${metric.value === 1 ? '' : 's'}</div><div class="next-action-meta">${escapeHtml(metric.action)}</div></div>`).join('') || '<div class="action-card"><div class="label">Next Actions</div><div class="next-action-title">No immediate actions</div><div class="next-action-meta">Everything looks clear right now.</div></div>';
     }
@@ -1335,7 +1438,7 @@ def build_dashboard_html(
       renderCards(baseActivityRows, baseSlaRows);
       renderOverview();
       document.getElementById('activity-table-body').innerHTML = activityRows.map((row) => `
-        <tr class="${row.reply_highlight}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Priority: ${escapeHtml(row.priority_label)} • Group: ${row.group_id || '-'} • Agent: ${escapeHtml(row.responder_name || String(row.responder_id || '-'))}</div></td><td>${escapeHtml(row.status_label)}</td><td>${escapeHtml(row.type || '')}</td><td>${escapeHtml(row.updated_at || '')}</td><td>${replyPill(row)}<div class="small">Current waiting: ${row.customer_reverted ? 'Yes' : 'No'}</div></td><td>${yesNoUnknown(row.customer_reverted_ever, row.conversation_checked)}<div class="small">At least one customer revert</div></td><td>${yesNoUnknown(row.replied_after_customer_revert, row.conversation_checked)}<div class="small">Reply after revert</div></td><td>${escapeHtml(row.tags_display || '')}</td><td><div><strong>${escapeHtml(row.last_activity_type || '')}</strong></div><div class="small">${escapeHtml(row.last_activity_at || '')}</div><div>${escapeHtml(row.last_activity_preview || '')}</div></td><td class="timeline">${escapeHtml(row.timeline_excerpt || '')}</td></tr>`).join('');
+        <tr class="${row.reply_highlight}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Priority: ${escapeHtml(row.priority_label)} • Group: ${row.group_id || '-'} • Agent: ${escapeHtml(displayAgentName(row))}</div></td><td>${escapeHtml(row.status_label)}</td><td>${escapeHtml(row.type || '')}</td><td>${escapeHtml(row.updated_at || '')}</td><td>${replyPill(row)}<div class="small">Current waiting: ${row.customer_reverted ? 'Yes' : 'No'}</div></td><td>${yesNoUnknown(row.customer_reverted_ever, row.conversation_checked)}<div class="small">At least one customer revert</div></td><td>${yesNoUnknown(row.replied_after_customer_revert, row.conversation_checked)}<div class="small">Reply after revert</div></td><td>${escapeHtml(row.tags_display || '')}</td><td><div><strong>${escapeHtml(row.last_activity_type || '')}</strong></div><div class="small">${escapeHtml(row.last_activity_at || '')}</div><div>${escapeHtml(row.last_activity_preview || '')}</div></td><td class="timeline">${escapeHtml(row.timeline_excerpt || '')}</td></tr>`).join('');
       document.getElementById('sla-table-body').innerHTML = slaRows.map((row) => `
         <tr class="${row.sla_red_flag ? 'sla-red' : row.sla_amber_flag ? 'sla-amber' : ''}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Status: ${escapeHtml(row.status_label)} • Type: ${escapeHtml(row.type || '')}</div></td><td>${escapeHtml(row.sla_category || '')}</td><td>${escapeHtml(row.priority_label || '')}</td><td>${escapeHtml(row.created_at_ist || '')}</td><td>${escapeHtml(row.closed_at_ist || row.resolved_at_ist || '') || '<span class="small">Open</span>'}</td><td><div>${escapeHtml(row.last_activity_at_ist || '')}</div><div class="small">${escapeHtml(row.last_activity_type || '')}</div></td><td>${escapeHtml(displayAgentName(row))}</td><td>${slaPill(row.ack_state, row.ack_label)}<div class="small">SLA: ${escapeHtml(row.ack_sla || 'NA')}</div></td><td>${slaPill(row.resolution_state, row.resolution_label)}<div class="small">SLA: ${escapeHtml(row.resolution_sla || 'NA')}</div></td><td>${slaPill(row.max_timeline_state, row.max_timeline_label)}<div class="small">Limit: ${escapeHtml(row.max_timeline_sla || 'NA')}</div></td><td>${escapeHtml(row.owner_team || '')}</td></tr>`).join('');
     }
@@ -1394,17 +1497,35 @@ def build_dashboard_html(
     renderCheckboxGroup('sla-filter-sla', ['red_flag', 'ack_breached', 'resolution_breached', 'max_timeline_breached', 'at_risk'], 'All SLA flags');
     ['activity-filter-highlight','activity-filter-status','activity-filter-type','activity-filter-company','sla-filter-status','sla-filter-type','sla-filter-company','sla-filter-sla'].forEach(wireGroup);
     ['activity-filter-company','sla-filter-company'].forEach(wireFilterSearch);
-    ['activity-date-from','activity-date-to','sla-date-from','sla-date-to'].forEach(wireDatePicker);
+    ['activity-date-from','activity-date-to','sla-date-from','sla-date-to','overview-date-from','overview-date-to'].forEach(wireDatePicker);
     document.getElementById('activity-search').addEventListener('input', render);
     document.getElementById('sla-search').addEventListener('input', render);
     document.getElementById('activity-date-from').addEventListener('input', render);
     document.getElementById('activity-date-to').addEventListener('input', render);
     document.getElementById('sla-date-from').addEventListener('input', render);
     document.getElementById('sla-date-to').addEventListener('input', render);
+    document.getElementById('overview-date-from').addEventListener('input', render);
+    document.getElementById('overview-date-to').addEventListener('input', render);
+    document.getElementById('overview-current-week').addEventListener('click', () => {
+      const now = new Date();
+      document.getElementById('overview-date-from').value = formatDateInputValue(startOfWeek(now));
+      document.getElementById('overview-date-to').value = formatDateInputValue(endOfWeek(now));
+      render();
+    });
+    document.getElementById('overview-last-week').addEventListener('click', () => {
+      const now = new Date();
+      const lastWeekEnd = addDays(startOfWeek(now), -1);
+      const lastWeekStart = startOfWeek(lastWeekEnd);
+      document.getElementById('overview-date-from').value = formatDateInputValue(lastWeekStart);
+      document.getElementById('overview-date-to').value = formatDateInputValue(endOfWeek(lastWeekStart));
+      render();
+    });
     document.getElementById('tab-activity').addEventListener('click', () => setView('activity'));
     document.getElementById('tab-sla').addEventListener('click', () => setView('sla'));
     document.getElementById('tab-overview').addEventListener('click', () => setView('overview'));
     __REFRESH_JS__
+    document.getElementById('overview-date-from').value = formatDateInputValue(startOfWeek(new Date()));
+    document.getElementById('overview-date-to').value = formatDateInputValue(endOfWeek(new Date()));
     setView('activity');
   </script>
 </body>
