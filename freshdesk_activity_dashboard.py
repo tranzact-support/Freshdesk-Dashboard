@@ -1184,6 +1184,12 @@ def build_dashboard_html(
       next.setDate(next.getDate() + days);
       return next;
     }
+    function startOfMonth(date) {
+      return new Date(date.getFullYear(), date.getMonth(), 1);
+    }
+    function endOfMonth(date) {
+      return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+    }
     function endOfWeek(date) {
       const end = addDays(startOfWeek(date), 6);
       end.setHours(23, 59, 59, 999);
@@ -1544,16 +1550,17 @@ def build_dashboard_html(
     });
     document.getElementById('overview-current-month').addEventListener('click', () => {
       const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      const start = startOfMonth(now);
+      const end = endOfMonth(now);
       document.getElementById('overview-date-from').value = formatDateInputValue(start);
       document.getElementById('overview-date-to').value = formatDateInputValue(end);
       render();
     });
     document.getElementById('overview-last-month').addEventListener('click', () => {
       const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const end = new Date(now.getFullYear(), now.getMonth(), 0);
+      const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const start = startOfMonth(previousMonth);
+      const end = endOfMonth(previousMonth);
       document.getElementById('overview-date-from').value = formatDateInputValue(start);
       document.getElementById('overview-date-to').value = formatDateInputValue(end);
       render();
