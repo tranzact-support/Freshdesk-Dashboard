@@ -19,6 +19,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+import freshdesk_cli
+import freshdesk_hubspot_sync
+
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -42,6 +45,8 @@ DEFAULT_ALL_TICKETS_SINCE = "1970-01-01"
 DEFAULT_RETRY_COUNT = 8
 DEFAULT_RETRY_DELAY_SECONDS = 2.0
 DEFAULT_CONVERSATION_WORKERS = 8
+DEFAULT_HUBSPOT_ENV_FILE = "/Users/shishirraj/.config/hubspot.env"
+DEFAULT_HUBSPOT_UI_DOMAIN = "app.hubspot.com"
 
 TICKET_TYPE_ALIASES = {
     "Feature Request": "Feature Idea",
@@ -731,6 +736,83 @@ def load_string_cache(path: Path, key: str) -> Dict[str, str]:
     return {str(cache_key): str(cache_value) for cache_key, cache_value in values.items()}
 
 
+def build_hubspot_deal_url(ui_domain: str, portal_id: str, deal_id: str) -> str:
+    portal = portal_id.strip()
+    identifier = deal_id.strip()
+    domain = ui_domain.strip() or DEFAULT_HUBSPOT_UI_DOMAIN
+    if not portal or not identifier:
+        return ""
+    return f"https://{domain}/contacts/{portal}/record/0-3/{identifier}"
+
+
+def enrich_hubspot_context(
+    *,
+    tickets: Sequence[Dict[str, object]],
+    ticket_map: Dict[str, Dict],
+    output_dir: Path,
+    hubspot_client: Optional[freshdesk_hubspot_sync.HubSpotClient],
+    hubspot_ui_domain: str,
+    hubspot_portal_id: str,
+    fetch_errors: List[str],
+) -> Tuple[Dict[int, str], Dict[int, str], Dict[int, int], Dict[str, str]]:
+    contact_company_cache_path = output_dir / ".hubspot_contact_company_cache.json"
+    contact_company_cache = load_string_cache(contact_company_cache_path, "contact_companies")
+
+    company_names_by_ticket: Dict[int, str] = {}
+    primary_deal_url_by_ticket: Dict[int, str] = {}
+    deal_count_by_ticket: Dict[int, int] = {}
+
+    contact_ids = sorted(
+        {
+            str((ticket_map.get(str(as_int(ticket.get("id")) or 0)) or {}).get("hubspot_contact_id") or "").strip()
+            for ticket in tickets
+            if as_int(ticket.get("id"))
+        }
+        - {""}
+    )
+    hubspot_contact_companies: Dict[str, str] = {}
+    for contact_id in contact_ids:
+        cached_company_name = contact_company_cache.get(contact_id, "").strip()
+        if cached_company_name:
+            hubspot_contact_companies[contact_id] = cached_company_name
+            continue
+        if hubspot_client is None:
+            continue
+        try:
+            contact = hubspot_client.get_contact(contact_id, properties=["company"])
+            properties = contact.get("properties") if isinstance(contact.get("properties"), dict) else {}
+            company_name = str((properties or {}).get("company") or "").strip()
+            if company_name:
+                hubspot_contact_companies[contact_id] = company_name
+                contact_company_cache[contact_id] = company_name
+        except freshdesk_hubspot_sync.HttpError as exc:
+            fetch_errors.append(f"hubspot contact {contact_id}: {exc}")
+
+    for ticket in tickets:
+        ticket_id = as_int(ticket.get("id")) or 0
+        if ticket_id <= 0:
+            continue
+        entry = ticket_map.get(str(ticket_id)) or {}
+        contact_id = str(entry.get("hubspot_contact_id") or "").strip()
+        hubspot_company_name = hubspot_contact_companies.get(contact_id, "").strip()
+        if hubspot_company_name:
+            company_names_by_ticket[ticket_id] = hubspot_company_name
+
+        deal_ids = [
+            str(value).strip()
+            for value in (entry.get("hubspot_deal_ids") or [])
+            if str(value).strip()
+        ]
+        if not deal_ids:
+            continue
+        deal_count_by_ticket[ticket_id] = len(deal_ids)
+        primary_url = build_hubspot_deal_url(hubspot_ui_domain, hubspot_portal_id, deal_ids[0])
+        if primary_url:
+            primary_deal_url_by_ticket[ticket_id] = primary_url
+
+    return company_names_by_ticket, primary_deal_url_by_ticket, deal_count_by_ticket, contact_company_cache
+
+
 def cached_activity_metrics(
     cache: Dict[str, Dict[str, object]], ticket_id: int, ticket_updated_at: str
 ) -> Optional[Dict[str, object]]:
@@ -777,7 +859,10 @@ def build_row(
         "priority": as_int(ticket.get("priority")) or 0,
         "priority_label": priority_label(ticket.get("priority")),
         "type": normalize_ticket_type(ticket.get("type")),
+        "freshdesk_company_name": str(ticket.get("_freshdesk_company_name") or "").strip() or "Unknown",
         "company_name": str(ticket.get("_company_name") or "").strip() or "Unknown",
+        "hubspot_deal_url": str(ticket.get("_hubspot_deal_url") or "").strip(),
+        "hubspot_deal_count": as_int(ticket.get("_hubspot_deal_count")) or 0,
         "source": as_int(ticket.get("source")) or 0,
         "created_at": str(ticket.get("created_at") or ""),
         "created_at_ist": format_datetime_ist(ticket.get("created_at")),
@@ -915,6 +1000,10 @@ def write_csv(path: Path, rows: Sequence[Dict[str, object]]) -> None:
         "status_label",
         "priority_label",
         "type",
+        "company_name",
+        "freshdesk_company_name",
+        "hubspot_deal_url",
+        "hubspot_deal_count",
         "created_at",
         "updated_at",
         "last_activity_at",
@@ -1039,6 +1128,15 @@ def build_dashboard_html(
     .mini-row { display:grid; grid-template-columns: 150px 1fr auto; gap:12px; align-items:center; }
     .mini-track { background:#0b1220; border:1px solid #334155; border-radius:999px; overflow:hidden; height:12px; }
     .mini-fill { background:#2563eb; height:100%; }
+    .mini-fill.pending { background:#f59e0b; }
+    .mini-fill.created { background:#2563eb; }
+    .mini-fill.closed { background:#22c55e; }
+    .category-progress { display:grid; gap:12px; margin-top:12px; }
+    .category-progress-head, .category-progress-row { display:grid; grid-template-columns: minmax(160px, 1.3fr) repeat(3, minmax(120px, 1fr)); gap:12px; align-items:center; }
+    .category-progress-head { color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+    .category-progress-label { font-size:13px; font-weight:600; }
+    .category-progress-cell { display:grid; gap:6px; }
+    .category-progress-value { color:#cbd5e1; font-size:12px; }
     .line-chart { margin-top:14px; }
     .line-chart svg { width:100%; height:220px; display:block; }
     .line-labels { display:flex; justify-content:space-between; gap:8px; color:#94a3b8; font-size:12px; margin-top:10px; }
@@ -1083,7 +1181,7 @@ def build_dashboard_html(
         <details class="filter-box"><summary>Company Name</summary><div class="filter-list" id="activity-filter-company"></div></details>
       </div>
       <table>
-        <thead><tr><th>ID</th><th>Subject</th><th>Status</th><th>Type</th><th>Updated</th><th>Reply Check</th><th>Customer Reverted</th><th>Replied Same Ticket</th><th>Tags</th><th>Latest Activity</th><th>Recent Timeline</th></tr></thead>
+        <thead><tr><th>ID</th><th>Subject</th><th>Status</th><th>Type</th><th>Company</th><th>HubSpot Deal</th><th>Updated</th><th>Reply Check</th><th>Customer Reverted</th><th>Replied Same Ticket</th><th>Tags</th><th>Latest Activity</th><th>Recent Timeline</th></tr></thead>
         <tbody id="activity-table-body"></tbody>
       </table>
     </div>
@@ -1098,7 +1196,7 @@ def build_dashboard_html(
         <details class="filter-box"><summary>SLA Flags</summary><div class="filter-list" id="sla-filter-sla"></div></details>
       </div>
       <table>
-        <thead><tr><th>ID</th><th>Subject</th><th>Category</th><th>Priority</th><th>Created IST</th><th>Closed IST</th><th>Last Activity IST</th><th>Done By</th><th>Ack SLA</th><th>Resolution SLA</th><th>Max Timeline</th><th>Owner</th></tr></thead>
+        <thead><tr><th>ID</th><th>Subject</th><th>Category</th><th>Priority</th><th>Company</th><th>HubSpot Deal</th><th>Created IST</th><th>Closed IST</th><th>Last Activity IST</th><th>Done By</th><th>Ack SLA</th><th>Resolution SLA</th><th>Max Timeline</th><th>Owner</th></tr></thead>
         <tbody id="sla-table-body"></tbody>
       </table>
     </div>
@@ -1128,9 +1226,10 @@ def build_dashboard_html(
             <div class="line-legend"><span><span class="legend-dot" style="background:#2563eb"></span>Opened</span><span><span class="legend-dot" style="background:#22c55e"></span>Closed / Resolved</span></div>
           </div>
           <div class="chart-card">
-            <div class="label">Weekly Queue Snapshot</div>
-            <div class="subvalue">Active tickets created in the selected range</div>
+            <div class="label">Category Queue Progress</div>
+            <div class="subvalue">Pending from previous, created, and closed by ticket category</div>
             <div class="mini-bars" id="overview-category-bars"></div>
+            <div class="line-legend"><span><span class="legend-dot" style="background:#f59e0b"></span>Pending From Previous</span><span><span class="legend-dot" style="background:#2563eb"></span>Created In Range</span><span><span class="legend-dot" style="background:#22c55e"></span>Closed In Range</span></div>
           </div>
         </div>
       </div>
@@ -1205,6 +1304,23 @@ def build_dashboard_html(
       const normalized = String(label || '').trim().toLowerCase();
       return normalized === 'closed' || normalized === 'resolved' || isRejectedStatus(normalized);
     }
+    function closedAtForRow(row) {
+      return parseDate(row.closed_at || row.resolved_at);
+    }
+    function isPendingAtStart(row, fromDate) {
+      const createdAt = parseDate(row.created_at);
+      if (!(createdAt && createdAt < fromDate)) return false;
+      const closedAt = closedAtForRow(row);
+      if (closedAt) return closedAt >= fromDate;
+      return !isClosedLikeStatus(row.status_label);
+    }
+    function isPendingAtEnd(row, toDate) {
+      const createdAt = parseDate(row.created_at);
+      if (!(createdAt && createdAt <= toDate)) return false;
+      const closedAt = closedAtForRow(row);
+      if (closedAt) return closedAt > toDate;
+      return !isClosedLikeStatus(row.status_label);
+    }
     function getOverviewDateRange() {
       const fromInput = document.getElementById('overview-date-from');
       const toInput = document.getElementById('overview-date-to');
@@ -1257,9 +1373,22 @@ def build_dashboard_html(
       }).join('');
       return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${grid}<path d="${pathFor(pointsA)}" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round"></path><path d="${pathFor(pointsB)}" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round"></path>${circlesFor(pointsA, '#2563eb')}${circlesFor(pointsB, '#22c55e')}</svg>`;
     }
-    function overviewMetricFilterRows(rowsToFilter, metricKey) {
+    function overviewMetricFilterRows(rowsToFilter, metricKey, fromDate, toDate) {
       if (!metricKey || metricKey === 'tickets') return rowsToFilter;
-      if (metricKey === 'tickets_this_week') return rowsToFilter;
+      if (metricKey === 'tickets_this_week' || metricKey === 'created_in_range') {
+        return rowsToFilter.filter((row) => {
+          const createdAt = parseDate(row.created_at);
+          return createdAt && createdAt >= fromDate && createdAt <= toDate;
+        });
+      }
+      if (metricKey === 'pending_from_previous') return rowsToFilter.filter((row) => isPendingAtStart(row, fromDate));
+      if (metricKey === 'closed_in_range') {
+        return rowsToFilter.filter((row) => {
+          const closedAt = closedAtForRow(row);
+          return closedAt && closedAt >= fromDate && closedAt <= toDate;
+        });
+      }
+      if (metricKey === 'pending_at_end') return rowsToFilter.filter((row) => isPendingAtEnd(row, toDate));
       if (metricKey === 'pending_sop') return rowsToFilter.filter((row) => row.sla_red_flag || row.sla_amber_flag || row.ack_state === 'breached' || row.resolution_state === 'breached' || row.max_timeline_state === 'breached');
       if (metricKey === 'not_accepted') return rowsToFilter.filter((row) => ['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim()));
       if (metricKey === 'customer_waiting') return rowsToFilter.filter((row) => row.reply_highlight === 'overdue' || row.reply_highlight === 'waiting');
@@ -1274,22 +1403,28 @@ def build_dashboard_html(
       const { fromDate, toDate } = getOverviewDateRange();
       const weekDays = buildDailyBuckets(fromDate, toDate);
       const selectedTypes = selectedValues('overview-filter-type');
-      const inRangeRows = rows.filter((row) => {
+      const filteredRows = rows.filter((row) => matchesMulti(row.type, selectedTypes));
+      const inRangeRows = filteredRows.filter((row) => {
         const createdAt = parseDate(row.created_at);
-        if (!(createdAt && createdAt >= fromDate && createdAt <= toDate)) return false;
-        return matchesMulti(row.type, selectedTypes);
+        return Boolean(createdAt && createdAt >= fromDate && createdAt <= toDate);
       });
-      const activeRows = inRangeRows.filter((row) => !isClosedLikeStatus(row.status_label));
+      const pendingFromPreviousRows = filteredRows.filter((row) => isPendingAtStart(row, fromDate));
+      const closedInRangeRows = filteredRows.filter((row) => {
+        const closedAt = closedAtForRow(row);
+        return Boolean(closedAt && closedAt >= fromDate && closedAt <= toDate);
+      });
+      const activeRows = filteredRows.filter((row) => isPendingAtEnd(row, toDate));
       inRangeRows.forEach((row) => {
         const createdAt = parseDate(row.created_at);
         if (!createdAt) return;
         const bucket = weekDays.find((item) => item.key === formatDateInputValue(createdAt));
         if (bucket) bucket.opened += 1;
-        const closedAt = parseDate(row.closed_at || row.resolved_at);
-        if (closedAt && closedAt >= fromDate && closedAt <= toDate) {
-          const closedBucket = weekDays.find((item) => item.key === formatDateInputValue(closedAt));
-          if (closedBucket) closedBucket.closed += 1;
-        }
+      });
+      closedInRangeRows.forEach((row) => {
+        const closedAt = closedAtForRow(row);
+        if (!closedAt) return;
+        const closedBucket = weekDays.find((item) => item.key === formatDateInputValue(closedAt));
+        if (closedBucket) closedBucket.closed += 1;
       });
       const pendingSop = activeRows.filter((row) => row.sla_red_flag || row.sla_amber_flag || row.ack_state === 'breached' || row.resolution_state === 'breached' || row.max_timeline_state === 'breached');
       const notAcceptedByTech = activeRows.filter((row) => ['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim()));
@@ -1299,15 +1434,40 @@ def build_dashboard_html(
         if (!updatedAt) return false;
         return ((Date.now() - updatedAt.getTime()) / 3600000) >= 48;
       });
+      const categoryProgress = [...new Set(filteredRows.map((row) => row.type || 'Unspecified').filter(Boolean))]
+        .map((type) => {
+          const typedRows = filteredRows.filter((row) => (row.type || 'Unspecified') === type);
+          const pendingFromPrevious = typedRows.filter((row) => isPendingAtStart(row, fromDate)).length;
+          const createdInRange = typedRows.filter((row) => {
+            const createdAt = parseDate(row.created_at);
+            return Boolean(createdAt && createdAt >= fromDate && createdAt <= toDate);
+          }).length;
+          const closedInRange = typedRows.filter((row) => {
+            const closedAt = closedAtForRow(row);
+            return Boolean(closedAt && closedAt >= fromDate && closedAt <= toDate);
+          }).length;
+          return {
+            label: type,
+            pendingFromPrevious,
+            createdInRange,
+            closedInRange,
+            totalMovement: pendingFromPrevious + createdInRange + closedInRange,
+          };
+        })
+        .filter((item) => item.totalMovement > 0)
+        .sort((left, right) => right.totalMovement - left.totalMovement || left.label.localeCompare(right.label));
       const metrics = [
-        { key: 'tickets_this_week', label: 'Tickets In Range', value: inRangeRows.length, detail: `${activeRows.length} still active`, action: 'Review newly created tickets in this range and assign owners.' },
+        { key: 'pending_from_previous', label: 'Pending From Previous', value: pendingFromPreviousRows.length, detail: 'Created before the selected range and still open at the start', action: 'Review carry-forward workload first so older tickets do not get buried.' },
+        { key: 'created_in_range', label: 'Created In Range', value: inRangeRows.length, detail: 'New tickets opened inside the selected range', action: 'Check incoming load by category and assign ownership quickly.' },
+        { key: 'closed_in_range', label: 'Closed In Range', value: closedInRangeRows.length, detail: 'Resolved or closed inside the selected range', action: 'Use this to measure completed work across ticket categories.' },
+        { key: 'pending_at_end', label: 'Pending At End', value: activeRows.length, detail: 'Still open by the end of the selected range', action: 'Use this as the remaining queue after new intake and closures.' },
         { key: 'pending_sop', label: 'SOP Pending', value: pendingSop.length, detail: `${activeRows.length} active tickets in queue`, action: 'Start with red flags, then clear at-risk tickets.' },
         { key: 'not_accepted', label: 'Not Accepted By Tech', value: notAcceptedByTech.length, detail: 'Pending At Tech or To be Picked in Next TS', action: 'Push tech acceptance or move to the correct owner/team.' },
         { key: 'customer_waiting', label: 'Customer Waiting', value: customerWaiting.length, detail: 'Reply needed on the same ticket', action: 'Reply on the ticket or share a delay update with the customer.' },
         { key: 'red_flags', label: 'Red Flags', value: activeRows.filter((row) => row.sla_red_flag).length, detail: 'Open SLA breaches right now', action: 'Escalate breaches first and communicate ETAs.' },
         { key: 'stuck', label: 'Stuck 48h+', value: stalledRows.length, detail: 'No update for at least 48 hours', action: 'Review stale tickets and unblock owners immediately.' },
       ];
-      const filteredAttentionSource = overviewMetricFilterRows(activeRows, activeCardFilters.overview);
+      const filteredAttentionSource = overviewMetricFilterRows(filteredRows, activeCardFilters.overview, fromDate, toDate);
       const attentionRows = filteredAttentionSource.map((row) => {
         const updatedAt = parseDate(row.updated_at || row.last_activity_at);
         const staleHours = updatedAt ? Math.round((Date.now() - updatedAt.getTime()) / 3600000) : 0;
@@ -1320,11 +1480,11 @@ def build_dashboard_html(
         else if (row.sla_amber_flag) { reason = 'At risk of delay'; severity = 1; }
         return { row, staleHours, reason, severity };
       }).filter((item) => item.severity > 0).sort((left, right) => right.severity - left.severity || right.staleHours - left.staleHours).slice(0, 8);
-      return { weekDays, metrics, activeRows, attentionRows, fromDate, toDate, selectedTypes };
+      return { weekDays, metrics, activeRows, attentionRows, fromDate, toDate, selectedTypes, categoryProgress, pendingFromPreviousRows, closedInRangeRows };
     }
     function renderOverview() {
       const overview = buildOverviewStats();
-      document.getElementById('overview-helper').textContent = `Showing tickets created from ${formatDateInputValue(overview.fromDate)} to ${formatDateInputValue(overview.toDate)}.`;
+      document.getElementById('overview-helper').textContent = `Showing queue progress from ${formatDateInputValue(overview.fromDate)} to ${formatDateInputValue(overview.toDate)}. Pending from previous means tickets created before the start date and still open when the range began.`;
       document.getElementById('overview-metrics').innerHTML = overview.metrics.map((metric) => `
         <div class="overview-card ${activeCardFilters.overview === metric.key ? 'active' : ''}">
           <button class="overview-card-button" type="button" data-overview-card="${metric.key}">
@@ -1345,11 +1505,14 @@ def build_dashboard_html(
       const maxLineValue = Math.max(1, ...openedValues, ...closedValues);
       document.getElementById('weekly-open-close-chart').innerHTML = buildLineChartSvg(openedValues, closedValues, maxLineValue);
       document.getElementById('weekly-open-close-labels').innerHTML = overview.weekDays.map((item) => `<span>${escapeHtml(item.label)}<br>${escapeHtml(item.fullLabel)}</span>`).join('');
-      const maxMetricValue = Math.max(1, ...overview.metrics.map((metric) => metric.value));
-      document.getElementById('overview-category-bars').innerHTML = overview.metrics.map((metric) => {
-        const width = Math.max(2, Math.round((metric.value / maxMetricValue) * 100));
-        return `<div class="mini-row"><div>${escapeHtml(metric.label)}</div><div class="mini-track"><div class="mini-fill" style="width:${width}%"></div></div><div>${metric.value}</div></div>`;
-      }).join('');
+      const categoryValues = overview.categoryProgress.flatMap((item) => [item.pendingFromPrevious, item.createdInRange, item.closedInRange]);
+      const maxCategoryValue = Math.max(1, ...categoryValues);
+      document.getElementById('overview-category-bars').innerHTML = overview.categoryProgress.length ? [`<div class="category-progress-head"><div>Category</div><div>Pending From Previous</div><div>Created In Range</div><div>Closed In Range</div></div>`, ...overview.categoryProgress.map((item) => {
+        const pendingWidth = item.pendingFromPrevious ? Math.max(2, Math.round((item.pendingFromPrevious / maxCategoryValue) * 100)) : 0;
+        const createdWidth = item.createdInRange ? Math.max(2, Math.round((item.createdInRange / maxCategoryValue) * 100)) : 0;
+        const closedWidth = item.closedInRange ? Math.max(2, Math.round((item.closedInRange / maxCategoryValue) * 100)) : 0;
+        return `<div class="category-progress-row"><div class="category-progress-label">${escapeHtml(item.label)}</div><div class="category-progress-cell"><div class="mini-track"><div class="mini-fill pending" style="width:${pendingWidth}%"></div></div><div class="category-progress-value">${item.pendingFromPrevious}</div></div><div class="category-progress-cell"><div class="mini-track"><div class="mini-fill created" style="width:${createdWidth}%"></div></div><div class="category-progress-value">${item.createdInRange}</div></div><div class="category-progress-cell"><div class="mini-track"><div class="mini-fill closed" style="width:${closedWidth}%"></div></div><div class="category-progress-value">${item.closedInRange}</div></div></div>`;
+      })].join('') : '<div class="attention-item"><div class="attention-title">No category movement in this range</div><div class="attention-meta">Try a wider date range or remove the ticket category filter.</div></div>';
       document.getElementById('overview-attention').innerHTML = overview.attentionRows.map((item) => {
         const row = item.row;
         return `<div class="attention-item"><div class="attention-title"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">#${row.ticket_id}</a> — ${escapeHtml(row.subject)}</div><div class="attention-meta">Status: ${escapeHtml(row.status_label)} • Done By: ${escapeHtml(displayAgentName(row))} • Last updated: ${escapeHtml(row.updated_at_ist || row.last_activity_at_ist || '-')}</div><div class="attention-reason">${escapeHtml(item.reason)}</div></div>`;
@@ -1375,6 +1538,11 @@ def build_dashboard_html(
     function replyPill(row) {
       const label = row.reply_highlight === 'overdue' ? `Overdue${row.reply_age_hours ? ` (${row.reply_age_hours}h)` : ''}` : row.reply_highlight === 'waiting' ? `Waiting${row.reply_age_hours ? ` (${row.reply_age_hours}h)` : ''}` : 'OK';
       return `<span class="pill ${row.reply_highlight}">${label}</span>`;
+    }
+    function hubspotDealCell(row) {
+      if (!row.hubspot_deal_url) return '<span class="small">—</span>';
+      const suffix = row.hubspot_deal_count > 1 ? ` (+${row.hubspot_deal_count - 1})` : '';
+      return `<a href="${escapeHtml(row.hubspot_deal_url)}" target="_blank" rel="noreferrer">Open Deal</a><div class="small">HubSpot${suffix}</div>`;
     }
     function yesNoUnknown(value, checked) {
       if (!checked) return '<span class="small">Not checked</span>';
@@ -1468,9 +1636,9 @@ def build_dashboard_html(
       renderCards(baseActivityRows, baseSlaRows);
       renderOverview();
       document.getElementById('activity-table-body').innerHTML = activityRows.map((row) => `
-        <tr class="${row.reply_highlight}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Priority: ${escapeHtml(row.priority_label)} • Group: ${row.group_id || '-'} • Agent: ${escapeHtml(displayAgentName(row))}</div></td><td>${escapeHtml(row.status_label)}</td><td>${escapeHtml(row.type || '')}</td><td>${escapeHtml(row.updated_at || '')}</td><td>${replyPill(row)}<div class="small">Current waiting: ${row.customer_reverted ? 'Yes' : 'No'}</div></td><td>${yesNoUnknown(row.customer_reverted_ever, row.conversation_checked)}<div class="small">At least one customer revert</div></td><td>${yesNoUnknown(row.replied_after_customer_revert, row.conversation_checked)}<div class="small">Reply after revert</div></td><td>${escapeHtml(row.tags_display || '')}</td><td><div><strong>${escapeHtml(row.last_activity_type || '')}</strong></div><div class="small">${escapeHtml(row.last_activity_at || '')}</div><div>${escapeHtml(row.last_activity_preview || '')}</div></td><td class="timeline">${escapeHtml(row.timeline_excerpt || '')}</td></tr>`).join('');
+        <tr class="${row.reply_highlight}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Priority: ${escapeHtml(row.priority_label)} • Group: ${row.group_id || '-'} • Agent: ${escapeHtml(displayAgentName(row))}</div></td><td>${escapeHtml(row.status_label)}</td><td>${escapeHtml(row.type || '')}</td><td>${escapeHtml(row.company_name || 'Unknown')}</td><td>${hubspotDealCell(row)}</td><td>${escapeHtml(row.updated_at || '')}</td><td>${replyPill(row)}<div class="small">Current waiting: ${row.customer_reverted ? 'Yes' : 'No'}</div></td><td>${yesNoUnknown(row.customer_reverted_ever, row.conversation_checked)}<div class="small">At least one customer revert</div></td><td>${yesNoUnknown(row.replied_after_customer_revert, row.conversation_checked)}<div class="small">Reply after revert</div></td><td>${escapeHtml(row.tags_display || '')}</td><td><div><strong>${escapeHtml(row.last_activity_type || '')}</strong></div><div class="small">${escapeHtml(row.last_activity_at || '')}</div><div>${escapeHtml(row.last_activity_preview || '')}</div></td><td class="timeline">${escapeHtml(row.timeline_excerpt || '')}</td></tr>`).join('');
       document.getElementById('sla-table-body').innerHTML = slaRows.map((row) => `
-        <tr class="${row.sla_red_flag ? 'sla-red' : row.sla_amber_flag ? 'sla-amber' : ''}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Status: ${escapeHtml(row.status_label)} • Type: ${escapeHtml(row.type || '')}</div></td><td>${escapeHtml(row.sla_category || '')}</td><td>${escapeHtml(row.priority_label || '')}</td><td>${escapeHtml(row.created_at_ist || '')}</td><td>${escapeHtml(row.closed_at_ist || row.resolved_at_ist || '') || '<span class="small">Open</span>'}</td><td><div>${escapeHtml(row.last_activity_at_ist || '')}</div><div class="small">${escapeHtml(row.last_activity_type || '')}</div></td><td>${escapeHtml(displayAgentName(row))}</td><td>${slaPill(row.ack_state, row.ack_label)}<div class="small">SLA: ${escapeHtml(row.ack_sla || 'NA')}</div></td><td>${slaPill(row.resolution_state, row.resolution_label)}<div class="small">SLA: ${escapeHtml(row.resolution_sla || 'NA')}</div></td><td>${slaPill(row.max_timeline_state, row.max_timeline_label)}<div class="small">Limit: ${escapeHtml(row.max_timeline_sla || 'NA')}</div></td><td>${escapeHtml(row.owner_team || '')}</td></tr>`).join('');
+        <tr class="${row.sla_red_flag ? 'sla-red' : row.sla_amber_flag ? 'sla-amber' : ''}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Status: ${escapeHtml(row.status_label)} • Type: ${escapeHtml(row.type || '')}</div></td><td>${escapeHtml(row.sla_category || '')}</td><td>${escapeHtml(row.priority_label || '')}</td><td>${escapeHtml(row.company_name || 'Unknown')}</td><td>${hubspotDealCell(row)}</td><td>${escapeHtml(row.created_at_ist || '')}</td><td>${escapeHtml(row.closed_at_ist || row.resolved_at_ist || '') || '<span class="small">Open</span>'}</td><td><div>${escapeHtml(row.last_activity_at_ist || '')}</div><div class="small">${escapeHtml(row.last_activity_type || '')}</div></td><td>${escapeHtml(displayAgentName(row))}</td><td>${slaPill(row.ack_state, row.ack_label)}<div class="small">SLA: ${escapeHtml(row.ack_sla || 'NA')}</div></td><td>${slaPill(row.resolution_state, row.resolution_label)}<div class="small">SLA: ${escapeHtml(row.resolution_sla || 'NA')}</div></td><td>${slaPill(row.max_timeline_state, row.max_timeline_label)}<div class="small">Limit: ${escapeHtml(row.max_timeline_sla || 'NA')}</div></td><td>${escapeHtml(row.owner_team || '')}</td></tr>`).join('');
     }
     function wireGroup(containerId) {
       document.getElementById(containerId).addEventListener('change', (event) => {
@@ -1627,6 +1795,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory where HTML, JSON, CSV, and status files will be written.",
     )
     parser.add_argument(
+        "--hubspot-env-file",
+        default=DEFAULT_HUBSPOT_ENV_FILE,
+        help="Path to env file with HUBSPOT_ACCESS_TOKEN, HUBSPOT_PORTAL_ID, and HUBSPOT_UI_DOMAIN.",
+    )
+    parser.add_argument(
+        "--hubspot-state-file",
+        default=str(Path(__file__).with_name(".freshdesk_hubspot_sync_state.json")),
+        help="Path to the HubSpot sync state file used to map Freshdesk tickets to HubSpot deals.",
+    )
+    parser.add_argument(
         "--updated-since",
         help="Fetch tickets updated on or after this UTC date in YYYY-MM-DD format.",
     )
@@ -1764,6 +1942,18 @@ def main() -> int:
     agent_cache = load_agent_cache(agent_cache_path)
     requester_company_cache = load_string_cache(requester_company_cache_path, "requester_companies")
     company_name_cache = load_string_cache(company_name_cache_path, "companies")
+    hubspot_env = freshdesk_hubspot_sync.load_env(Path(args.hubspot_env_file))
+    hubspot_access_token = freshdesk_hubspot_sync.env_or_file("HUBSPOT_ACCESS_TOKEN", hubspot_env)
+    hubspot_portal_id = freshdesk_hubspot_sync.env_or_file("HUBSPOT_PORTAL_ID", hubspot_env)
+    hubspot_ui_domain = freshdesk_hubspot_sync.env_or_file(
+        "HUBSPOT_UI_DOMAIN", hubspot_env, DEFAULT_HUBSPOT_UI_DOMAIN
+    )
+    hubspot_client = (
+        freshdesk_hubspot_sync.HubSpotClient(hubspot_access_token)
+        if hubspot_access_token
+        else None
+    )
+    hubspot_ticket_map = freshdesk_cli.load_hubspot_sync_ticket_map(Path(args.hubspot_state_file))
 
     responder_ids = sorted({as_int(ticket.get("responder_id")) or 0 for ticket in tickets if as_int(ticket.get("responder_id"))})
     agent_names: Dict[int, str] = {}
@@ -1807,6 +1997,21 @@ def main() -> int:
             company_name_cache[company_id] = resolved_company_name
         except HttpError as exc:
             fetch_errors.append(f"company {company_id}: {exc}")
+
+    (
+        hubspot_company_names_by_ticket,
+        hubspot_deal_urls_by_ticket,
+        hubspot_deal_counts_by_ticket,
+        hubspot_contact_company_cache,
+    ) = enrich_hubspot_context(
+        tickets=tickets,
+        ticket_map=hubspot_ticket_map,
+        output_dir=output_dir,
+        hubspot_client=hubspot_client,
+        hubspot_ui_domain=hubspot_ui_domain,
+        hubspot_portal_id=hubspot_portal_id,
+        fetch_errors=fetch_errors,
+    )
 
     rows: List[Dict[str, object]] = []
     tag_sync = {"updated": 0, "unchanged": 0, "failed": 0}
@@ -1873,7 +2078,11 @@ def main() -> int:
         company_id = requester_company_ids.get(requester_id, "")
         ticket_payload = dict(ticket)
         ticket_payload["_responder_name"] = agent_names.get(responder_id, "")
-        ticket_payload["_company_name"] = company_names.get(company_id, "")
+        freshdesk_company_name = company_names.get(company_id, "")
+        ticket_payload["_freshdesk_company_name"] = freshdesk_company_name
+        ticket_payload["_company_name"] = hubspot_company_names_by_ticket.get(ticket_id, "") or freshdesk_company_name
+        ticket_payload["_hubspot_deal_url"] = hubspot_deal_urls_by_ticket.get(ticket_id, "")
+        ticket_payload["_hubspot_deal_count"] = hubspot_deal_counts_by_ticket.get(ticket_id, 0)
         try:
             conversations = []
             metrics_override = None if no_conversations else resolved_metrics.get(ticket_id)
@@ -1974,6 +2183,10 @@ def main() -> int:
     write_json(
         company_name_cache_path,
         {"generated_at": utc_now_iso(), "companies": company_name_cache},
+    )
+    write_json(
+        output_dir / ".hubspot_contact_company_cache.json",
+        {"generated_at": utc_now_iso(), "contact_companies": hubspot_contact_company_cache},
     )
     write_json(activity_cache_path, {"generated_at": utc_now_iso(), "tickets": activity_cache})
     write_json(json_path, payload)

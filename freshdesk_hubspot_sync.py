@@ -434,6 +434,23 @@ class HubSpotClient:
             if isinstance(item, dict) and item.get("id") is not None
         ]
 
+    def get_contact(
+        self, contact_id: str, properties: Optional[Iterable[str]] = None
+    ) -> Dict[str, object]:
+        property_names = [str(item).strip() for item in (properties or ["company"]) if str(item).strip()]
+        code, data, raw = self.request(
+            "GET",
+            f"/crm/v3/objects/contacts/{contact_id}",
+            query={"properties": ",".join(property_names)},
+        )
+        if code != 200 or not isinstance(data, dict):
+            raise HttpError(
+                "HubSpot contact fetch failed for contact {0} with HTTP {1}: {2}".format(
+                    contact_id, code, raw[:400]
+                )
+            )
+        return data
+
     def associate_ticket_to_contact(self, ticket_id: str, contact_id: str) -> None:
         code, data, raw = self.request(
             "PUT",

@@ -243,6 +243,7 @@ What it shows:
 - customer revert detection
 - overdue vs waiting reply highlights
 - existing tags and optional Freshdesk tag sync
+- HubSpot company name and primary deal link on the `Activity` and `SOP / SLA` views when `~/.config/hubspot.env` and `.freshdesk_hubspot_sync_state.json` are available
 
 ### Run once
 
@@ -314,6 +315,19 @@ Open it in your browser:
 http://127.0.0.1:8787
 ```
 
+To keep it available automatically after login and on your home network, install the bundled `launchd` agent:
+
+```bash
+cd /Users/shishirraj/freshdesk-tool
+chmod +x run_dashboard_web.sh
+cp launchd/com.shishirraj.freshdesk-dashboard.plist ~/Library/LaunchAgents/
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.shishirraj.freshdesk-dashboard.plist 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.shishirraj.freshdesk-dashboard.plist
+launchctl kickstart -k gui/$(id -u)/com.shishirraj.freshdesk-dashboard
+```
+
+Once loaded, the dashboard binds to all interfaces on port `8787`, so you can open it locally at `http://127.0.0.1:8787` or from devices on the same home network at `http://Shishirs-MacBook-Air.local:8787`.
+
 To share it with teammates on the same network, start it on all interfaces and share your computer IP plus port:
 
 ```bash
@@ -327,6 +341,28 @@ Useful routes:
 - `/api/dashboard` raw JSON
 - `/download.csv` CSV export
 - `/refresh` refresh trigger used by the dashboard button
+
+### GitHub Pages version
+
+This repo can also publish the dashboard as a static GitHub Pages site.
+
+What gets published:
+
+- site home page from `dashboard/freshdesk_activity_dashboard.html`
+- raw export at `dashboard/freshdesk_activity_dashboard.json`
+- CSV export at `dashboard/freshdesk_activity_dashboard.csv`
+
+Setup steps:
+
+1. In the GitHub repository, add Actions secrets:
+   - `FRESHDESK_DOMAIN`
+   - `FRESHDESK_API_KEY`
+   - `HUBSPOT_ACCESS_TOKEN`
+   - `HUBSPOT_PORTAL_ID`
+2. In GitHub, enable Pages and set the source to **GitHub Actions**.
+3. Run the workflow in `.github/workflows/deploy-dashboard-pages.yml`, or push to `main`.
+
+The workflow also refreshes the published dashboard every hour.
 
 ### Permanent hosted deployment
 

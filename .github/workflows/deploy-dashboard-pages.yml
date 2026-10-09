@@ -24,6 +24,8 @@ jobs:
     env:
       FRESHDESK_DOMAIN: ${{ secrets.FRESHDESK_DOMAIN }}
       FRESHDESK_API_KEY: ${{ secrets.FRESHDESK_API_KEY }}
+      HUBSPOT_ACCESS_TOKEN: ${{ secrets.HUBSPOT_ACCESS_TOKEN }}
+      HUBSPOT_PORTAL_ID: ${{ secrets.HUBSPOT_PORTAL_ID }}
       ACTIVITY_DASHBOARD_ALL_TICKETS: "1"
       ACTIVITY_DASHBOARD_REPLY_SLA_HOURS: "24"
       ACTIVITY_DASHBOARD_MAX_RETRIES: "8"
@@ -44,6 +46,8 @@ jobs:
         run: |
           test -n "$FRESHDESK_DOMAIN"
           test -n "$FRESHDESK_API_KEY"
+          test -n "$HUBSPOT_ACCESS_TOKEN"
+          test -n "$HUBSPOT_PORTAL_ID"
 
       - name: Restore dashboard caches
         id: restore-dashboard-cache
