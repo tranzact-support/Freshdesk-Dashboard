@@ -451,6 +451,51 @@ class HubSpotClient:
             )
         return data
 
+    def search_companies(self, query_text: str, limit: int = 10) -> List[Dict[str, object]]:
+        query_text = str(query_text or "").strip()
+        if not query_text:
+            return []
+        payload = {
+            "query": query_text,
+            "properties": ["name", "createdate", "hs_lastmodifieddate"],
+            "limit": limit,
+        }
+        code, data, raw = self.request(
+            "POST", "/crm/v3/objects/companies/search", payload
+        )
+        if code != 200 or not isinstance(data, dict):
+            raise HttpError(
+                "HubSpot company search failed with HTTP {0}: {1}".format(
+                    code, raw[:400]
+                )
+            )
+        return [
+            item
+            for item in (data.get("results") or [])
+            if isinstance(item, dict) and item.get("id") is not None
+        ]
+
+    def get_deal(
+        self, deal_id: str, properties: Optional[Iterable[str]] = None
+    ) -> Dict[str, object]:
+        property_names = [
+            str(item).strip()
+            for item in (properties or ["dealname", "dealstage", "closedate", "createdate", "hs_lastmodifieddate"])
+            if str(item).strip()
+        ]
+        code, data, raw = self.request(
+            "GET",
+            f"/crm/v3/objects/deals/{deal_id}",
+            query={"properties": ",".join(property_names)},
+        )
+        if code != 200 or not isinstance(data, dict):
+            raise HttpError(
+                "HubSpot deal fetch failed for deal {0} with HTTP {1}: {2}".format(
+                    deal_id, code, raw[:400]
+                )
+            )
+        return data
+
     def associate_ticket_to_contact(self, ticket_id: str, contact_id: str) -> None:
         code, data, raw = self.request(
             "PUT",

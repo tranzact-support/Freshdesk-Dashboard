@@ -745,6 +745,56 @@ def build_hubspot_deal_url(ui_domain: str, portal_id: str, deal_id: str) -> str:
     return f"https://{domain}/contacts/{portal}/record/0-3/{identifier}"
 
 
+def normalize_company_lookup_name(value: object) -> str:
+    return " ".join(str(value or "").split()).strip().lower()
+
+
+def choose_best_hubspot_company_match(
+    freshdesk_company_name: str,
+    matches: Sequence[Dict[str, object]],
+) -> Optional[Dict[str, object]]:
+    normalized_target = normalize_company_lookup_name(freshdesk_company_name)
+    exact_matches: List[Dict[str, object]] = []
+    loose_matches: List[Dict[str, object]] = []
+    for item in matches:
+        properties = item.get("properties") if isinstance(item.get("properties"), dict) else {}
+        candidate_name = str((properties or {}).get("name") or "").strip()
+        normalized_candidate = normalize_company_lookup_name(candidate_name)
+        if not normalized_candidate:
+            continue
+        if normalized_candidate == normalized_target:
+            exact_matches.append(item)
+        elif normalized_target and (
+            normalized_target in normalized_candidate or normalized_candidate in normalized_target
+        ):
+            loose_matches.append(item)
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    if exact_matches:
+        return exact_matches[0]
+    if len(loose_matches) == 1:
+        return loose_matches[0]
+    if len(matches) == 1:
+        return matches[0]
+    return loose_matches[0] if loose_matches else None
+
+
+def choose_best_hubspot_deal(
+    deals: Sequence[Dict[str, object]],
+) -> Optional[Dict[str, object]]:
+    def sort_key(item: Dict[str, object]) -> Tuple[int, str, str]:
+        properties = item.get("properties") if isinstance(item.get("properties"), dict) else {}
+        stage = str((properties or {}).get("dealstage") or "").strip().lower()
+        is_closed = 1 if stage in {"closedwon", "closedlost", "closed_lost", "closed_won"} else 0
+        modified = str((properties or {}).get("hs_lastmodifieddate") or "")
+        created = str((properties or {}).get("createdate") or "")
+        return (is_closed, modified, created)
+
+    if not deals:
+        return None
+    return sorted(deals, key=sort_key, reverse=True)[0]
+
+
 def enrich_hubspot_context(
     *,
     tickets: Sequence[Dict[str, object]],
@@ -757,6 +807,8 @@ def enrich_hubspot_context(
 ) -> Tuple[Dict[int, str], Dict[int, str], Dict[int, int], Dict[str, str]]:
     contact_company_cache_path = output_dir / ".hubspot_contact_company_cache.json"
     contact_company_cache = load_string_cache(contact_company_cache_path, "contact_companies")
+    direct_company_cache_path = output_dir / ".hubspot_company_deal_cache.json"
+    direct_company_cache = load_string_cache(direct_company_cache_path, "company_deals")
 
     company_names_by_ticket: Dict[int, str] = {}
     primary_deal_url_by_ticket: Dict[int, str] = {}
@@ -809,6 +861,86 @@ def enrich_hubspot_context(
         primary_url = build_hubspot_deal_url(hubspot_ui_domain, hubspot_portal_id, deal_ids[0])
         if primary_url:
             primary_deal_url_by_ticket[ticket_id] = primary_url
+
+    company_names_missing_deals = sorted(
+        {
+            str((ticket.get("_freshdesk_company_name") or ticket.get("_company_name") or "")).strip()
+            for ticket in tickets
+            if as_int(ticket.get("id"))
+            and not primary_deal_url_by_ticket.get(as_int(ticket.get("id")) or 0)
+            and str((ticket.get("_freshdesk_company_name") or ticket.get("_company_name") or "")).strip()
+            and str((ticket.get("_freshdesk_company_name") or ticket.get("_company_name") or "")).strip().lower() != "unknown"
+        }
+    )
+    direct_lookup_results: Dict[str, Tuple[str, str, int]] = {}
+    for freshdesk_company_name in company_names_missing_deals:
+        cache_key = normalize_company_lookup_name(freshdesk_company_name)
+        cached_value = direct_company_cache.get(cache_key, "")
+        cached_parts = [part.strip() for part in cached_value.split("|")]
+        if len(cached_parts) == 3:
+            cached_name, cached_url, cached_count = cached_parts
+            try:
+                direct_lookup_results[cache_key] = (cached_name, cached_url, int(cached_count or "0"))
+                continue
+            except ValueError:
+                pass
+        if hubspot_client is None:
+            continue
+        try:
+            matches = hubspot_client.search_companies(freshdesk_company_name, limit=10)
+            matched_company = choose_best_hubspot_company_match(freshdesk_company_name, matches)
+            if matched_company is None:
+                direct_company_cache[cache_key] = "||0"
+                direct_lookup_results[cache_key] = ("", "", 0)
+                continue
+            hubspot_company_id = str(matched_company.get("id") or "").strip()
+            properties = matched_company.get("properties") if isinstance(matched_company.get("properties"), dict) else {}
+            resolved_company_name = str((properties or {}).get("name") or "").strip()
+            associated_deal_ids = (
+                hubspot_client.list_associated_object_ids("companies", hubspot_company_id, "deals")
+                if hubspot_company_id
+                else []
+            )
+            deal_records: List[Dict[str, object]] = []
+            for deal_id in associated_deal_ids[:10]:
+                try:
+                    deal_records.append(hubspot_client.get_deal(deal_id))
+                except freshdesk_hubspot_sync.HttpError as exc:
+                    fetch_errors.append(f"hubspot deal {deal_id}: {exc}")
+            best_deal = choose_best_hubspot_deal(deal_records)
+            best_deal_id = str((best_deal or {}).get("id") or "").strip()
+            best_deal_url = build_hubspot_deal_url(hubspot_ui_domain, hubspot_portal_id, best_deal_id)
+            direct_lookup_results[cache_key] = (
+                resolved_company_name,
+                best_deal_url,
+                len(associated_deal_ids),
+            )
+            direct_company_cache[cache_key] = (
+                f"{resolved_company_name}|{best_deal_url}|{len(associated_deal_ids)}"
+            )
+        except freshdesk_hubspot_sync.HttpError as exc:
+            fetch_errors.append(f"hubspot company {freshdesk_company_name}: {exc}")
+
+    for ticket in tickets:
+        ticket_id = as_int(ticket.get("id")) or 0
+        if ticket_id <= 0:
+            continue
+        freshdesk_company_name = str((ticket.get("_freshdesk_company_name") or ticket.get("_company_name") or "")).strip()
+        if not freshdesk_company_name or freshdesk_company_name.lower() == "unknown":
+            continue
+        cache_key = normalize_company_lookup_name(freshdesk_company_name)
+        resolved_company_name, best_deal_url, deal_count = direct_lookup_results.get(cache_key, ("", "", 0))
+        if resolved_company_name and not company_names_by_ticket.get(ticket_id):
+            company_names_by_ticket[ticket_id] = resolved_company_name
+        if best_deal_url and not primary_deal_url_by_ticket.get(ticket_id):
+            primary_deal_url_by_ticket[ticket_id] = best_deal_url
+        if deal_count and not deal_count_by_ticket.get(ticket_id):
+            deal_count_by_ticket[ticket_id] = deal_count
+
+    write_json(
+        direct_company_cache_path,
+        {"generated_at": utc_now_iso(), "company_deals": direct_company_cache},
+    )
 
     return company_names_by_ticket, primary_deal_url_by_ticket, deal_count_by_ticket, contact_company_cache
 
@@ -1997,6 +2129,11 @@ def main() -> int:
             company_name_cache[company_id] = resolved_company_name
         except HttpError as exc:
             fetch_errors.append(f"company {company_id}: {exc}")
+
+    for ticket in tickets:
+        requester_id = as_int(ticket.get("requester_id")) or 0
+        company_id = requester_company_ids.get(requester_id, "")
+        ticket["_freshdesk_company_name"] = company_names.get(company_id, "")
 
     (
         hubspot_company_names_by_ticket,
