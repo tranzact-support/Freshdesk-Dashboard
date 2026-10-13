@@ -1313,7 +1313,7 @@ def build_dashboard_html(
     .period-stats { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:8px; margin-top:12px; }
     .period-stat { background:#0b1220; border:1px solid #1e293b; border-radius:10px; padding:8px; }
     .period-stat strong { display:block; font-size:16px; }
-    .overview-card, .chart-card { background:#111827; border:1px solid #334155; border-radius:12px; padding:16px; }
+    .overview-card, .chart-card { background:#111827; border:1px solid #334155; border-radius:12px; padding:16px; min-width:0; overflow:hidden; }
     .overview-card .label, .chart-card .label, .attention-item .label { color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
     .overview-card .value { font-size:32px; font-weight:700; margin-top:8px; }
     .overview-card .subvalue, .chart-card .subvalue { color:#94a3b8; font-size:12px; margin-top:8px; }
@@ -1342,14 +1342,17 @@ def build_dashboard_html(
     .mini-fill.task { background:#0ea5e9; }
     .mini-fill.other { background:#64748b; }
     .category-progress { display:grid; gap:12px; margin-top:12px; }
-    .category-progress-head, .category-progress-row { display:grid; grid-template-columns: minmax(160px, 1.3fr) repeat(3, minmax(120px, 1fr)); gap:12px; align-items:center; }
+    .category-progress-head, .category-progress-row { display:grid; grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr)); gap:12px; align-items:center; }
     .category-progress-head { color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
-    .category-progress-label { font-size:13px; font-weight:600; }
-    .category-progress-cell { display:grid; gap:6px; }
-    .category-progress-value { color:#cbd5e1; font-size:12px; }
+    .category-progress-label { font-size:13px; font-weight:600; min-width:0; overflow-wrap:anywhere; word-break:break-word; }
+    .category-progress-cell { display:grid; gap:6px; min-width:0; }
+    .category-progress-value { color:#cbd5e1; font-size:12px; min-width:0; overflow-wrap:anywhere; word-break:break-word; }
     .company-progress { display:grid; gap:12px; margin-top:12px; }
-    .company-progress-head, .company-progress-row { display:grid; grid-template-columns: minmax(160px, 1.3fr) minmax(220px, 2fr) minmax(60px, .5fr); gap:12px; align-items:center; }
+    .company-progress-head, .company-progress-row { display:grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.7fr) minmax(44px, .35fr); gap:12px; align-items:center; }
     .company-progress-head { color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+    .company-progress-head > div, .category-progress-head > div { min-width:0; overflow-wrap:anywhere; word-break:break-word; }
+    .company-progress-cell { min-width:0; }
+    .company-progress-cell .small { overflow-wrap:anywhere; word-break:break-word; }
     .stacked-track { background:#0b1220; border:1px solid #334155; border-radius:999px; overflow:hidden; height:12px; display:flex; }
     .stack-segment { height:100%; }
     .stack-segment.bug { background:#ef4444; }
@@ -1369,6 +1372,13 @@ def build_dashboard_html(
     .attention-reason { margin-top:8px; font-size:13px; }
     .snapshot-flag { display:inline-flex; align-items:center; gap:6px; margin-top:6px; flex-wrap:wrap; }
     .next-step { font-weight:600; color:#bfdbfe; }
+    @media (max-width: 1200px) {
+      .overview-grid.graphs-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 900px) {
+      .category-progress-head, .company-progress-head { display:none; }
+      .category-progress-row, .company-progress-row { grid-template-columns: 1fr; gap:8px; }
+    }
   </style>
 </head>
 <body>
@@ -1437,6 +1447,19 @@ def build_dashboard_html(
           <thead id="sla-table-head"></thead>
           <tbody id="sla-table-body"></tbody>
         </table></div>
+        <div class="overview-section">
+          <div class="section-head">
+            <div>
+              <h2 class="section-title">Ticket Snapshot</h2>
+              <div class="section-copy">Keep the snapshot in the Ticket Pipeline view so the ticket list, SLA filters, owner view, and next agenda stay together.</div>
+            </div>
+            <details class="filter-box column-box"><summary>Show / Hide Columns</summary><div class="filter-list" id="overview-columns"></div></details>
+          </div>
+          <div class="table-wrap"><table>
+            <thead id="overview-table-head"></thead>
+            <tbody id="overview-table-body"></tbody>
+          </table></div>
+        </div>
       </div>
     </div>
     <div id="overview-view" class="hidden">
@@ -1457,7 +1480,7 @@ def build_dashboard_html(
       </div>
       <div class="overview-section">
         <h2 class="section-title">Graphs</h2>
-        <div class="overview-grid">
+        <div class="overview-grid graphs-grid">
           <div class="chart-card">
             <div class="label">Opened vs Closed</div>
             <div class="subvalue">Daily weekly trend inside the selected range</div>
@@ -1478,19 +1501,6 @@ def build_dashboard_html(
             <div class="line-legend"><span><span class="legend-dot" style="background:#ef4444"></span>Bug</span><span><span class="legend-dot" style="background:#8b5cf6"></span>Feature Idea</span><span><span class="legend-dot" style="background:#0ea5e9"></span>Task</span><span><span class="legend-dot" style="background:#64748b"></span>Other</span></div>
           </div>
         </div>
-      </div>
-      <div class="overview-section">
-        <div class="section-head">
-          <div>
-            <h2 class="section-title">Ticket Snapshot</h2>
-            <div class="section-copy">Quick snapshot for the selected period and metric card. Use this to see what is going on, where a ticket is stuck, who owns it, and the next agenda.</div>
-          </div>
-          <details class="filter-box column-box"><summary>Show / Hide Columns</summary><div class="filter-list" id="overview-columns"></div></details>
-        </div>
-        <div class="table-wrap"><table>
-          <thead id="overview-table-head"></thead>
-          <tbody id="overview-table-body"></tbody>
-        </table></div>
       </div>
       <div class="overview-section">
         <h2 class="section-title">Needs Attention</h2>
@@ -1739,6 +1749,27 @@ def build_dashboard_html(
       }).join('');
       return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${grid}<path d="${pathFor(pointsA)}" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round"></path><path d="${pathFor(pointsB)}" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round"></path>${circlesFor(pointsA, '#2563eb')}${circlesFor(pointsB, '#22c55e')}</svg>`;
     }
+    function isSopPendingRow(row) {
+      return String(row.status_label || '').trim() === 'Pending';
+    }
+    function scoreSnapshotRows(rowsToScore) {
+      return rowsToScore.map((row) => {
+        const staleHours = hoursSinceLastUpdate(row) || 0;
+        let reason = row.sop_action || 'Review next step';
+        let severity = 0;
+        if (row.sla_red_flag || row.ack_state === 'breached' || row.resolution_state === 'breached' || row.max_timeline_state === 'breached') { reason = 'SLA breach needs immediate action'; severity = 4; }
+        else if (row.reply_highlight === 'overdue') { reason = 'Customer is waiting for a reply'; severity = 3; }
+        else if (['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim())) { reason = 'Pending technical acceptance'; severity = 2; }
+        else if (staleHours >= 48) { reason = `No update for ${Math.round(staleHours)}h`; severity = 2; }
+        else if (row.sla_amber_flag) { reason = 'At risk of delay'; severity = 1; }
+        return {
+          row: { ...row, _overview_reason: reason, _next_agenda: suggestNextAgenda(row), _stale_hours: staleHours },
+          staleHours,
+          reason,
+          severity,
+        };
+      }).sort((left, right) => right.severity - left.severity || right.staleHours - left.staleHours || Number(right.row.ticket_id || 0) - Number(left.row.ticket_id || 0));
+    }
     function overviewMetricFilterRows(rowsToFilter, metricKey, fromDate, toDate) {
       if (!metricKey || metricKey === 'tickets') return rowsToFilter;
       if (metricKey === 'tickets_this_week' || metricKey === 'created_in_range') {
@@ -1755,11 +1786,12 @@ def build_dashboard_html(
         });
       }
       if (metricKey === 'pending_at_end') return rowsToFilter.filter((row) => isPendingAtEnd(row, toDate));
-      if (metricKey === 'pending_sop') return rowsToFilter.filter((row) => row.sla_red_flag || row.sla_amber_flag || row.ack_state === 'breached' || row.resolution_state === 'breached' || row.max_timeline_state === 'breached');
-      if (metricKey === 'not_accepted') return rowsToFilter.filter((row) => ['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim()));
-      if (metricKey === 'customer_waiting') return rowsToFilter.filter((row) => row.reply_highlight === 'overdue' || row.reply_highlight === 'waiting');
-      if (metricKey === 'red_flags') return rowsToFilter.filter((row) => row.sla_red_flag);
+      if (metricKey === 'pending_sop') return rowsToFilter.filter((row) => isPendingAtEnd(row, toDate) && isSopPendingRow(row));
+      if (metricKey === 'not_accepted') return rowsToFilter.filter((row) => isPendingAtEnd(row, toDate) && ['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim()));
+      if (metricKey === 'customer_waiting') return rowsToFilter.filter((row) => isPendingAtEnd(row, toDate) && (row.reply_highlight === 'overdue' || row.reply_highlight === 'waiting'));
+      if (metricKey === 'red_flags') return rowsToFilter.filter((row) => isPendingAtEnd(row, toDate) && row.sla_red_flag);
       if (metricKey === 'stuck') return rowsToFilter.filter((row) => {
+        if (!isPendingAtEnd(row, toDate)) return false;
         const updatedAt = parseDate(row.updated_at || row.last_activity_at);
         return updatedAt && ((Date.now() - updatedAt.getTime()) / 3600000) >= 48;
       });
@@ -1807,7 +1839,7 @@ def build_dashboard_html(
         const closedBucket = weekDays.find((item) => item.key === formatDateInputValue(closedAt));
         if (closedBucket) closedBucket.closed += 1;
       });
-      const pendingSop = activeRows.filter((row) => row.sla_red_flag || row.sla_amber_flag || row.ack_state === 'breached' || row.resolution_state === 'breached' || row.max_timeline_state === 'breached');
+      const pendingSop = activeRows.filter((row) => isSopPendingRow(row));
       const notAcceptedByTech = activeRows.filter((row) => ['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim()));
       const customerWaiting = activeRows.filter((row) => row.reply_highlight === 'overdue' || row.reply_highlight === 'waiting');
       const stalledRows = activeRows.filter((row) => {
@@ -1833,31 +1865,15 @@ def build_dashboard_html(
         { key: 'created_in_range', label: 'Created In Range', value: inRangeRows.length, detail: 'Tickets raised inside the selected period', action: 'Review incoming workload and distribute ownership quickly.' },
         { key: 'closed_in_range', label: 'Closed In Range', value: closedInRangeRows.length, detail: 'Tickets resolved or closed in the period', action: 'Track output and closure pace by category.' },
         { key: 'pending_at_end', label: 'Pending At End', value: activeRows.length, detail: 'Queue still open at period end', action: 'Use this as the remaining queue after intake and closures.' },
-        { key: 'pending_sop', label: 'SOP Pending', value: pendingSop.length, detail: `${activeRows.length} active tickets in queue`, action: 'Clear red flags and at-risk items first.' },
+        { key: 'pending_sop', label: 'SOP Pending', value: pendingSop.length, detail: 'Tickets still sitting in the core Pending stage', action: 'Work the pending queue before it spills into breach buckets.' },
         { key: 'not_accepted', label: 'Not Accepted By Tech', value: notAcceptedByTech.length, detail: 'Pending At Tech or To be Picked in Next TS', action: 'Push acceptance or re-assign to the right owner.' },
         { key: 'customer_waiting', label: 'Customer Waiting', value: customerWaiting.length, detail: 'Reply still pending on same ticket', action: 'Respond on the same ticket or send ETA.' },
         { key: 'red_flags', label: 'Red Flags', value: activeRows.filter((row) => row.sla_red_flag).length, detail: 'Current breaches in the active queue', action: 'Escalate and align owners immediately.' },
         { key: 'stuck', label: 'Stuck 48h+', value: stalledRows.length, detail: 'No meaningful update for 48+ hours', action: 'Unblock owner and set next agenda.' },
       ];
       const filteredAttentionSource = overviewMetricFilterRows(filteredRows, activeCardFilters.overview, fromDate, toDate);
-      const scoredRows = filteredAttentionSource.map((row) => {
-        const staleHours = hoursSinceLastUpdate(row) || 0;
-        let reason = row.sop_action || 'Review next step';
-        let severity = 0;
-        if (row.sla_red_flag || row.ack_state === 'breached' || row.resolution_state === 'breached' || row.max_timeline_state === 'breached') { reason = 'SLA breach needs immediate action'; severity = 4; }
-        else if (row.reply_highlight === 'overdue') { reason = 'Customer is waiting for a reply'; severity = 3; }
-        else if (['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim())) { reason = 'Pending technical acceptance'; severity = 2; }
-        else if (staleHours >= 48) { reason = `No update for ${Math.round(staleHours)}h`; severity = 2; }
-        else if (row.sla_amber_flag) { reason = 'At risk of delay'; severity = 1; }
-        return {
-          row: { ...row, _overview_reason: reason, _next_agenda: suggestNextAgenda(row), _stale_hours: staleHours },
-          staleHours,
-          reason,
-          severity,
-        };
-      }).sort((left, right) => right.severity - left.severity || right.staleHours - left.staleHours || Number(right.row.ticket_id || 0) - Number(left.row.ticket_id || 0));
+      const scoredRows = scoreSnapshotRows(filteredAttentionSource);
       const attentionRows = scoredRows.filter((item) => item.severity > 0).slice(0, 8);
-      const snapshotRows = scoredRows.slice(0, 30).map((item) => item.row);
       const companyMap = {};
       inRangeRows.forEach((row) => {
         const companyName = String(row.company_name || 'Unknown').trim() || 'Unknown';
@@ -1886,7 +1902,7 @@ def build_dashboard_html(
           active: sameDateValue(card.fromDate, fromDate) && sameDateValue(card.toDate, toDate),
         };
       });
-      return { weekDays, metrics, activeRows, attentionRows, snapshotRows, fromDate, toDate, selectedTypes, categoryProgress, pendingFromPreviousRows, closedInRangeRows, topCompanies, periodCards };
+      return { weekDays, metrics, activeRows, attentionRows, fromDate, toDate, selectedTypes, categoryProgress, pendingFromPreviousRows, closedInRangeRows, topCompanies, periodCards };
     }
     function renderOverview() {
       const overview = buildOverviewStats();
@@ -1948,7 +1964,6 @@ def build_dashboard_html(
         const otherWidth = Math.max(0, 100 - bugWidth - featureWidth - taskWidth);
         return `<div class="company-progress-row"><div class="category-progress-label">${escapeHtml(item.label)}</div><div class="company-progress-cell"><div class="stacked-track"><div class="stack-segment bug" style="width:${bugWidth}%"></div><div class="stack-segment feature" style="width:${featureWidth}%"></div><div class="stack-segment task" style="width:${taskWidth}%"></div><div class="stack-segment other" style="width:${otherWidth}%"></div></div><div class="small">Bug ${item.bug} • Feature ${item.feature} • Task ${item.task} • Other ${item.other}</div></div><div class="category-progress-value">${item.total}</div></div>`;
       })].join('') : '<div class="attention-item"><div class="attention-title">No company chart data in this range</div><div class="attention-meta">Top companies are based on tickets created in the selected duration.</div></div>';
-      renderDynamicTable('overview', 'overview-table-head', 'overview-table-body', overview.snapshotRows);
       document.getElementById('overview-attention').innerHTML = overview.attentionRows.map((item) => {
         const row = item.row;
         return `<div class="attention-item"><div class="attention-title"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">#${row.ticket_id}</a> — ${escapeHtml(row.subject)}</div><div class="attention-meta">Status: ${escapeHtml(row.status_label)} • Owner: ${escapeHtml(displayAgentName(row))} • Last updated: ${escapeHtml(row.updated_at_ist || row.last_activity_at_ist || '-')}</div><div class="attention-reason">${escapeHtml(item.reason)}</div></div>`;
@@ -2093,10 +2108,12 @@ def build_dashboard_html(
       const baseSlaRows = filteredRows('sla', false);
       const activityRows = filteredRows('activity');
       const slaRows = filteredRows('sla');
+      const slaSnapshotRows = scoreSnapshotRows(slaRows).slice(0, 30).map((item) => item.row);
       renderCards(baseActivityRows, baseSlaRows);
       renderOverview();
       renderDynamicTable('activity', 'activity-table-head', 'activity-table-body', activityRows);
       renderDynamicTable('sla', 'sla-table-head', 'sla-table-body', slaRows);
+      renderDynamicTable('overview', 'overview-table-head', 'overview-table-body', slaSnapshotRows);
     }
     function wireGroup(containerId) {
       document.getElementById(containerId).addEventListener('change', (event) => {
