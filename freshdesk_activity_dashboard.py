@@ -47,6 +47,7 @@ DEFAULT_RETRY_DELAY_SECONDS = 2.0
 DEFAULT_CONVERSATION_WORKERS = 8
 DEFAULT_HUBSPOT_ENV_FILE = "/Users/shishirraj/.config/hubspot.env"
 DEFAULT_HUBSPOT_UI_DOMAIN = "app.hubspot.com"
+DEFAULT_HUBSPOT_DEAL_URL_FIELD = "cf_hubspot_deal_url"
 
 TICKET_TYPE_ALIASES = {
     "Feature Request": "Feature Idea",
@@ -745,6 +746,26 @@ def build_hubspot_deal_url(ui_domain: str, portal_id: str, deal_id: str) -> str:
     return f"https://{domain}/contacts/{portal}/record/0-3/{identifier}"
 
 
+def get_ticket_custom_field_text(ticket: Dict[str, object], field_name: str) -> str:
+    custom_fields = ticket.get("custom_fields") if isinstance(ticket.get("custom_fields"), dict) else {}
+    return str((custom_fields or {}).get(field_name) or "").strip()
+
+
+def sync_hubspot_deal_url_field(
+    client: FreshdeskClient,
+    ticket_id: int,
+    field_name: str,
+    desired_url: str,
+    current_url: str,
+) -> bool:
+    desired = str(desired_url or "").strip()
+    current = str(current_url or "").strip()
+    if not desired or desired == current:
+        return False
+    client.update_ticket(ticket_id, {"custom_fields": {field_name: desired}})
+    return True
+
+
 def normalize_company_lookup_name(value: object) -> str:
     return " ".join(str(value or "").split()).strip().lower()
 
@@ -781,12 +802,14 @@ def choose_best_hubspot_company_match(
 
 def enrich_hubspot_context(
     *,
+    client: FreshdeskClient,
     tickets: Sequence[Dict[str, object]],
     ticket_map: Dict[str, Dict],
     output_dir: Path,
     hubspot_client: Optional[freshdesk_hubspot_sync.HubSpotClient],
     hubspot_ui_domain: str,
     hubspot_portal_id: str,
+    hubspot_deal_url_field: str,
     fetch_errors: List[str],
 ) -> Tuple[Dict[int, str], Dict[int, str], Dict[int, int], Dict[str, str]]:
     contact_company_cache_path = output_dir / ".hubspot_contact_company_cache.json"
@@ -828,6 +851,10 @@ def enrich_hubspot_context(
         ticket_id = as_int(ticket.get("id")) or 0
         if ticket_id <= 0:
             continue
+        field_url = get_ticket_custom_field_text(ticket, hubspot_deal_url_field)
+        if field_url:
+            primary_deal_url_by_ticket[ticket_id] = field_url
+            deal_count_by_ticket[ticket_id] = max(1, deal_count_by_ticket.get(ticket_id, 0))
         entry = ticket_map.get(str(ticket_id)) or {}
         contact_id = str(entry.get("hubspot_contact_id") or "").strip()
         hubspot_company_name = hubspot_contact_companies.get(contact_id, "").strip()
@@ -915,6 +942,21 @@ def enrich_hubspot_context(
             primary_deal_url_by_ticket[ticket_id] = best_deal_url
         if deal_count and not deal_count_by_ticket.get(ticket_id):
             deal_count_by_ticket[ticket_id] = deal_count
+        current_field_url = get_ticket_custom_field_text(ticket, hubspot_deal_url_field)
+        if best_deal_url:
+            try:
+                if sync_hubspot_deal_url_field(
+                    client,
+                    ticket_id,
+                    hubspot_deal_url_field,
+                    best_deal_url,
+                    current_field_url,
+                ):
+                    custom_fields = ticket.get("custom_fields") if isinstance(ticket.get("custom_fields"), dict) else {}
+                    ticket["custom_fields"] = dict(custom_fields or {})
+                    ticket["custom_fields"][hubspot_deal_url_field] = best_deal_url
+            except HttpError as exc:
+                fetch_errors.append(f"ticket {ticket_id} hubspot_deal_url sync failed: {exc}")
 
     write_json(
         direct_company_cache_path,
@@ -1916,6 +1958,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the HubSpot sync state file used to map Freshdesk tickets to HubSpot deals.",
     )
     parser.add_argument(
+        "--hubspot-deal-url-field",
+        default=DEFAULT_HUBSPOT_DEAL_URL_FIELD,
+        help="Freshdesk custom field name used to store the HubSpot deal URL.",
+    )
+    parser.add_argument(
         "--updated-since",
         help="Fetch tickets updated on or after this UTC date in YYYY-MM-DD format.",
     )
@@ -2120,12 +2167,14 @@ def main() -> int:
         hubspot_deal_counts_by_ticket,
         hubspot_contact_company_cache,
     ) = enrich_hubspot_context(
+        client=client,
         tickets=tickets,
         ticket_map=hubspot_ticket_map,
         output_dir=output_dir,
         hubspot_client=hubspot_client,
         hubspot_ui_domain=hubspot_ui_domain,
         hubspot_portal_id=hubspot_portal_id,
+        hubspot_deal_url_field=args.hubspot_deal_url_field,
         fetch_errors=fetch_errors,
     )
 
