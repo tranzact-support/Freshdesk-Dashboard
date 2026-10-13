@@ -880,8 +880,10 @@ def enrich_hubspot_context(
         if len(cached_parts) == 3:
             cached_name, cached_url, cached_count = cached_parts
             try:
-                direct_lookup_results[cache_key] = (cached_name, cached_url, int(cached_count or "0"))
-                continue
+                parsed_count = int(cached_count or "0")
+                if cached_name or cached_url or parsed_count > 0:
+                    direct_lookup_results[cache_key] = (cached_name, cached_url, parsed_count)
+                    continue
             except ValueError:
                 pass
         if hubspot_client is None:
@@ -890,7 +892,6 @@ def enrich_hubspot_context(
             matches = hubspot_client.search_companies(freshdesk_company_name, limit=10)
             matched_company = choose_best_hubspot_company_match(freshdesk_company_name, matches)
             if matched_company is None:
-                direct_company_cache[cache_key] = "||0"
                 direct_lookup_results[cache_key] = ("", "", 0)
                 continue
             hubspot_company_id = str(matched_company.get("id") or "").strip()
@@ -915,9 +916,10 @@ def enrich_hubspot_context(
                 best_deal_url,
                 len(associated_deal_ids),
             )
-            direct_company_cache[cache_key] = (
-                f"{resolved_company_name}|{best_deal_url}|{len(associated_deal_ids)}"
-            )
+            if resolved_company_name or best_deal_url or associated_deal_ids:
+                direct_company_cache[cache_key] = (
+                    f"{resolved_company_name}|{best_deal_url}|{len(associated_deal_ids)}"
+                )
         except freshdesk_hubspot_sync.HttpError as exc:
             fetch_errors.append(f"hubspot company {freshdesk_company_name}: {exc}")
 
