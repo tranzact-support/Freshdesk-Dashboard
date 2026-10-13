@@ -1386,16 +1386,16 @@ def build_dashboard_html(
       </div>
     </div>
     <div class="tabs">
-      <button class="tab-btn active" id="tab-activity">Activity</button>
-      <button class="tab-btn" id="tab-sla">SOP / SLA</button>
-      <button class="tab-btn" id="tab-overview">Overview</button>
+      <button class="tab-btn active" id="tab-overview">Weekly Ticket Activity</button>
+      <button class="tab-btn" id="tab-sla">Ticket Pipeline</button>
+      <button class="tab-btn" id="tab-activity">Email Alert</button>
     </div>
     <div class="cards" id="cards"></div>
     <div id="activity-view">
       <div class="view-section">
         <div class="section-head">
           <div>
-            <div class="section-title">Activity Queue</div>
+            <div class="section-title">Email Alert</div>
             <div class="section-copy">Keep this page action-focused: scan customer waiting tickets, stale updates, and the latest movement. Use show/hide columns to simplify the table for daily follow-up.</div>
           </div>
         </div>
@@ -1419,7 +1419,7 @@ def build_dashboard_html(
       <div class="view-section">
         <div class="section-head">
           <div>
-            <div class="section-title">SOP / SLA Queue</div>
+            <div class="section-title">Ticket Pipeline</div>
             <div class="section-copy">Use this screen for breach control, ownership checks, and next-step planning. Hide extra columns when you only want queue stage, owner, and SLA state.</div>
           </div>
         </div>
@@ -1441,7 +1441,7 @@ def build_dashboard_html(
     </div>
     <div id="overview-view" class="hidden">
       <div class="overview-section">
-        <h2 class="section-title">Quick Look</h2>
+        <h2 class="section-title">Weekly Ticket Activity</h2>
         <div class="overview-controls">
           <input class="date-input" id="overview-date-from" type="date" title="Overview from">
           <input class="date-input" id="overview-date-to" type="date" title="Overview to">
