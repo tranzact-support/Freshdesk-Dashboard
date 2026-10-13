@@ -779,22 +779,6 @@ def choose_best_hubspot_company_match(
     return loose_matches[0] if loose_matches else None
 
 
-def choose_best_hubspot_deal(
-    deals: Sequence[Dict[str, object]],
-) -> Optional[Dict[str, object]]:
-    def sort_key(item: Dict[str, object]) -> Tuple[int, str, str]:
-        properties = item.get("properties") if isinstance(item.get("properties"), dict) else {}
-        stage = str((properties or {}).get("dealstage") or "").strip().lower()
-        is_closed = 1 if stage in {"closedwon", "closedlost", "closed_lost", "closed_won"} else 0
-        modified = str((properties or {}).get("hs_lastmodifieddate") or "")
-        created = str((properties or {}).get("createdate") or "")
-        return (is_closed, modified, created)
-
-    if not deals:
-        return None
-    return sorted(deals, key=sort_key, reverse=True)[0]
-
-
 def enrich_hubspot_context(
     *,
     tickets: Sequence[Dict[str, object]],
@@ -902,14 +886,7 @@ def enrich_hubspot_context(
                 if hubspot_company_id
                 else []
             )
-            deal_records: List[Dict[str, object]] = []
-            for deal_id in associated_deal_ids[:10]:
-                try:
-                    deal_records.append(hubspot_client.get_deal(deal_id))
-                except freshdesk_hubspot_sync.HttpError as exc:
-                    fetch_errors.append(f"hubspot deal {deal_id}: {exc}")
-            best_deal = choose_best_hubspot_deal(deal_records)
-            best_deal_id = str((best_deal or {}).get("id") or "").strip()
+            best_deal_id = str(associated_deal_ids[0] if associated_deal_ids else "").strip()
             best_deal_url = build_hubspot_deal_url(hubspot_ui_domain, hubspot_portal_id, best_deal_id)
             direct_lookup_results[cache_key] = (
                 resolved_company_name,

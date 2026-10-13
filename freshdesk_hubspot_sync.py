@@ -306,6 +306,8 @@ class HubSpotClient:
     def __init__(self, access_token: str):
         self.base = "https://api.hubapi.com"
         self.access_token = access_token
+        self.max_retries = 6
+        self.retry_base_seconds = 2.0
 
     def request(
         self,
@@ -326,20 +328,34 @@ class HubSpotClient:
             body = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(url, data=body, headers=headers, method=method)
-        try:
-            with urllib.request.urlopen(request, timeout=120) as response:
-                raw = response.read().decode("utf-8", errors="replace")
-                parsed = json.loads(raw) if raw else None
-                return response.status, parsed, raw
-        except urllib.error.HTTPError as exc:
-            raw = exc.read().decode("utf-8", errors="replace")
-            parsed = None
-            if raw:
-                try:
-                    parsed = json.loads(raw)
-                except json.JSONDecodeError:
-                    parsed = None
-            return exc.code, parsed, raw
+        for attempt in range(1, self.max_retries + 2):
+            try:
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    raw = response.read().decode("utf-8", errors="replace")
+                    parsed = json.loads(raw) if raw else None
+                    return response.status, parsed, raw
+            except urllib.error.HTTPError as exc:
+                raw = exc.read().decode("utf-8", errors="replace")
+                parsed = None
+                if raw:
+                    try:
+                        parsed = json.loads(raw)
+                    except json.JSONDecodeError:
+                        parsed = None
+                if exc.code == 429 and attempt <= self.max_retries:
+                    retry_after = exc.headers.get("Retry-After") if exc.headers else ""
+                    try:
+                        delay = max(float(retry_after), self.retry_base_seconds)
+                    except (TypeError, ValueError):
+                        delay = self.retry_base_seconds * attempt
+                    time.sleep(delay)
+                    continue
+                return exc.code, parsed, raw
+            except urllib.error.URLError:
+                if attempt <= self.max_retries:
+                    time.sleep(self.retry_base_seconds * attempt)
+                    continue
+                raise
 
     def list_ticket_pipelines(self) -> List[Dict[str, object]]:
         code, data, raw = self.request("GET", "/crm/v3/pipelines/tickets")
