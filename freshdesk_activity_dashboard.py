@@ -1281,7 +1281,8 @@ def build_dashboard_html(
     .filter-item { display:flex; gap:8px; align-items:center; margin:6px 0; font-size:13px; }
     .filter-search { width: calc(100% - 24px); margin: 0 12px 8px; }
     .filter-item.hidden-item { display:none; }
-    table { width:100%; border-collapse:collapse; background:#111827; border-radius:12px; overflow:hidden; }
+    .table-wrap { overflow:auto; border:1px solid #334155; border-radius:12px; background:#111827; }
+    table { width:100%; border-collapse:collapse; background:#111827; border-radius:12px; overflow:hidden; min-width:1100px; }
     th, td { border-bottom:1px solid #1e293b; text-align:left; padding:10px 12px; vertical-align:top; font-size:13px; }
     th { position:sticky; top:0; background:#0b1220; z-index:1; }
     tr.overdue, tr.sla-red { background: rgba(220,38,38,.18); }
@@ -1296,7 +1297,22 @@ def build_dashboard_html(
     .id a { color:#93c5fd; text-decoration:none; }
     .timeline { max-width:420px; white-space:pre-wrap; }
     .hidden { display:none; }
+    .view-section { display:grid; gap:14px; }
+    .section-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+    .section-copy { color:#94a3b8; font-size:12px; margin-top:4px; max-width:780px; }
+    .column-box { min-width:220px; }
+    .table-empty { text-align:center; color:#94a3b8; padding:20px; }
     .overview-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:16px; margin-top:16px; }
+    .period-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:16px; margin-top:16px; }
+    .period-card { background:#111827; border:1px solid #334155; border-radius:12px; padding:0; overflow:hidden; }
+    .period-card-button { width:100%; border:0; background:transparent; color:inherit; text-align:left; padding:16px; cursor:pointer; }
+    .period-card.active { border-color:#2563eb; box-shadow: inset 0 0 0 1px #2563eb; }
+    .period-card-button:hover { background:#172033; }
+    .period-card .label { color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+    .period-card .value { font-size:18px; font-weight:700; margin-top:8px; }
+    .period-stats { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:8px; margin-top:12px; }
+    .period-stat { background:#0b1220; border:1px solid #1e293b; border-radius:10px; padding:8px; }
+    .period-stat strong { display:block; font-size:16px; }
     .overview-card, .chart-card { background:#111827; border:1px solid #334155; border-radius:12px; padding:16px; }
     .overview-card .label, .chart-card .label, .attention-item .label { color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
     .overview-card .value { font-size:32px; font-weight:700; margin-top:8px; }
@@ -1321,12 +1337,25 @@ def build_dashboard_html(
     .mini-fill.pending { background:#f59e0b; }
     .mini-fill.created { background:#2563eb; }
     .mini-fill.closed { background:#22c55e; }
+    .mini-fill.bug { background:#ef4444; }
+    .mini-fill.feature { background:#8b5cf6; }
+    .mini-fill.task { background:#0ea5e9; }
+    .mini-fill.other { background:#64748b; }
     .category-progress { display:grid; gap:12px; margin-top:12px; }
     .category-progress-head, .category-progress-row { display:grid; grid-template-columns: minmax(160px, 1.3fr) repeat(3, minmax(120px, 1fr)); gap:12px; align-items:center; }
     .category-progress-head { color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
     .category-progress-label { font-size:13px; font-weight:600; }
     .category-progress-cell { display:grid; gap:6px; }
     .category-progress-value { color:#cbd5e1; font-size:12px; }
+    .company-progress { display:grid; gap:12px; margin-top:12px; }
+    .company-progress-head, .company-progress-row { display:grid; grid-template-columns: minmax(160px, 1.3fr) minmax(220px, 2fr) minmax(60px, .5fr); gap:12px; align-items:center; }
+    .company-progress-head { color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+    .stacked-track { background:#0b1220; border:1px solid #334155; border-radius:999px; overflow:hidden; height:12px; display:flex; }
+    .stack-segment { height:100%; }
+    .stack-segment.bug { background:#ef4444; }
+    .stack-segment.feature { background:#8b5cf6; }
+    .stack-segment.task { background:#0ea5e9; }
+    .stack-segment.other { background:#64748b; }
     .line-chart { margin-top:14px; }
     .line-chart svg { width:100%; height:220px; display:block; }
     .line-labels { display:flex; justify-content:space-between; gap:8px; color:#94a3b8; font-size:12px; margin-top:10px; }
@@ -1338,6 +1367,8 @@ def build_dashboard_html(
     .attention-title { font-weight:700; }
     .attention-meta { color:#94a3b8; font-size:12px; margin-top:4px; }
     .attention-reason { margin-top:8px; font-size:13px; }
+    .snapshot-flag { display:inline-flex; align-items:center; gap:6px; margin-top:6px; flex-wrap:wrap; }
+    .next-step { font-weight:600; color:#bfdbfe; }
   </style>
 </head>
 <body>
@@ -1361,34 +1392,52 @@ def build_dashboard_html(
     </div>
     <div class="cards" id="cards"></div>
     <div id="activity-view">
-      <div class="controls">
-        <input id="activity-search" type="search" placeholder="Search subject, tags, ticket id">
-        <input class="date-input" id="activity-date-from" type="date" title="Created from">
-        <input class="date-input" id="activity-date-to" type="date" title="Created to">
-        <details class="filter-box"><summary>Reply State</summary><div class="filter-list" id="activity-filter-highlight"></div></details>
-        <details class="filter-box"><summary>Status</summary><div class="filter-list" id="activity-filter-status"></div></details>
-        <details class="filter-box"><summary>Ticket Category</summary><div class="filter-list" id="activity-filter-type"></div></details>
-        <details class="filter-box"><summary>Company Name</summary><div class="filter-list" id="activity-filter-company"></div></details>
+      <div class="view-section">
+        <div class="section-head">
+          <div>
+            <div class="section-title">Activity Queue</div>
+            <div class="section-copy">Keep this page action-focused: scan customer waiting tickets, stale updates, and the latest movement. Use show/hide columns to simplify the table for daily follow-up.</div>
+          </div>
+        </div>
+        <div class="controls">
+          <input id="activity-search" type="search" placeholder="Search subject, tags, ticket id">
+          <input class="date-input" id="activity-date-from" type="date" title="Created from">
+          <input class="date-input" id="activity-date-to" type="date" title="Created to">
+          <details class="filter-box"><summary>Reply State</summary><div class="filter-list" id="activity-filter-highlight"></div></details>
+          <details class="filter-box"><summary>Status</summary><div class="filter-list" id="activity-filter-status"></div></details>
+          <details class="filter-box"><summary>Ticket Category</summary><div class="filter-list" id="activity-filter-type"></div></details>
+          <details class="filter-box"><summary>Company Name</summary><div class="filter-list" id="activity-filter-company"></div></details>
+          <details class="filter-box column-box"><summary>Show / Hide Columns</summary><div class="filter-list" id="activity-columns"></div></details>
+        </div>
+        <div class="table-wrap"><table>
+          <thead id="activity-table-head"></thead>
+          <tbody id="activity-table-body"></tbody>
+        </table></div>
       </div>
-      <table>
-        <thead><tr><th>ID</th><th>Subject</th><th>Status</th><th>Type</th><th>Company</th><th>HubSpot Deal</th><th>Updated</th><th>Reply Check</th><th>Customer Reverted</th><th>Replied Same Ticket</th><th>Tags</th><th>Latest Activity</th><th>Recent Timeline</th></tr></thead>
-        <tbody id="activity-table-body"></tbody>
-      </table>
     </div>
     <div id="sla-view" class="hidden">
-      <div class="controls">
-        <input id="sla-search" type="search" placeholder="Search subject, category, ticket id">
-        <input class="date-input" id="sla-date-from" type="date" title="Created from">
-        <input class="date-input" id="sla-date-to" type="date" title="Created to">
-        <details class="filter-box"><summary>Status</summary><div class="filter-list" id="sla-filter-status"></div></details>
-        <details class="filter-box"><summary>Ticket Category</summary><div class="filter-list" id="sla-filter-type"></div></details>
-        <details class="filter-box"><summary>Company Name</summary><div class="filter-list" id="sla-filter-company"></div></details>
-        <details class="filter-box"><summary>SLA Flags</summary><div class="filter-list" id="sla-filter-sla"></div></details>
+      <div class="view-section">
+        <div class="section-head">
+          <div>
+            <div class="section-title">SOP / SLA Queue</div>
+            <div class="section-copy">Use this screen for breach control, ownership checks, and next-step planning. Hide extra columns when you only want queue stage, owner, and SLA state.</div>
+          </div>
+        </div>
+        <div class="controls">
+          <input id="sla-search" type="search" placeholder="Search subject, category, ticket id">
+          <input class="date-input" id="sla-date-from" type="date" title="Created from">
+          <input class="date-input" id="sla-date-to" type="date" title="Created to">
+          <details class="filter-box"><summary>Status</summary><div class="filter-list" id="sla-filter-status"></div></details>
+          <details class="filter-box"><summary>Ticket Category</summary><div class="filter-list" id="sla-filter-type"></div></details>
+          <details class="filter-box"><summary>Company Name</summary><div class="filter-list" id="sla-filter-company"></div></details>
+          <details class="filter-box"><summary>SLA Flags</summary><div class="filter-list" id="sla-filter-sla"></div></details>
+          <details class="filter-box column-box"><summary>Show / Hide Columns</summary><div class="filter-list" id="sla-columns"></div></details>
+        </div>
+        <div class="table-wrap"><table>
+          <thead id="sla-table-head"></thead>
+          <tbody id="sla-table-body"></tbody>
+        </table></div>
       </div>
-      <table>
-        <thead><tr><th>ID</th><th>Subject</th><th>Category</th><th>Priority</th><th>Company</th><th>HubSpot Deal</th><th>Created IST</th><th>Closed IST</th><th>Last Activity IST</th><th>Done By</th><th>Ack SLA</th><th>Resolution SLA</th><th>Max Timeline</th><th>Owner</th></tr></thead>
-        <tbody id="sla-table-body"></tbody>
-      </table>
     </div>
     <div id="overview-view" class="hidden">
       <div class="overview-section">
@@ -1403,6 +1452,7 @@ def build_dashboard_html(
           <details class="filter-box"><summary>Ticket Category</summary><div class="filter-list" id="overview-filter-type"></div></details>
         </div>
         <div class="overview-helper" id="overview-helper"></div>
+        <div class="period-grid" id="overview-period-cards"></div>
         <div class="overview-grid" id="overview-metrics"></div>
       </div>
       <div class="overview-section">
@@ -1421,7 +1471,26 @@ def build_dashboard_html(
             <div class="mini-bars" id="overview-category-bars"></div>
             <div class="line-legend"><span><span class="legend-dot" style="background:#f59e0b"></span>Pending From Previous</span><span><span class="legend-dot" style="background:#2563eb"></span>Created In Range</span><span><span class="legend-dot" style="background:#22c55e"></span>Closed In Range</span></div>
           </div>
+          <div class="chart-card">
+            <div class="label">Top 10 Companies</div>
+            <div class="subvalue">Tickets raised in the selected duration, split by bug, feature, task, and other.</div>
+            <div class="company-progress" id="overview-company-bars"></div>
+            <div class="line-legend"><span><span class="legend-dot" style="background:#ef4444"></span>Bug</span><span><span class="legend-dot" style="background:#8b5cf6"></span>Feature Idea</span><span><span class="legend-dot" style="background:#0ea5e9"></span>Task</span><span><span class="legend-dot" style="background:#64748b"></span>Other</span></div>
+          </div>
         </div>
+      </div>
+      <div class="overview-section">
+        <div class="section-head">
+          <div>
+            <h2 class="section-title">Ticket Snapshot</h2>
+            <div class="section-copy">Quick snapshot for the selected period and metric card. Use this to see what is going on, where a ticket is stuck, who owns it, and the next agenda.</div>
+          </div>
+          <details class="filter-box column-box"><summary>Show / Hide Columns</summary><div class="filter-list" id="overview-columns"></div></details>
+        </div>
+        <div class="table-wrap"><table>
+          <thead id="overview-table-head"></thead>
+          <tbody id="overview-table-body"></tbody>
+        </table></div>
       </div>
       <div class="overview-section">
         <h2 class="section-title">Needs Attention</h2>
@@ -1435,6 +1504,66 @@ def build_dashboard_html(
     const rows = data.rows || [];
     let currentView = 'activity';
     const activeCardFilters = { activity: 'tickets', sla: 'tickets', overview: 'tickets' };
+    const columnConfigs = {
+      activity: [
+        { id: 'ticket', label: 'ID', default: true, className: 'id', render: (row) => `<a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a>` },
+        { id: 'subject', label: 'Subject', default: true, className: 'subject', render: (row) => `<strong>${escapeHtml(row.subject)}</strong><div class="small">Priority: ${escapeHtml(row.priority_label || '-')} • Owner: ${escapeHtml(displayAgentName(row))}</div>` },
+        { id: 'status', label: 'Status', default: true, render: (row) => escapeHtml(row.status_label || '') },
+        { id: 'type', label: 'Category', default: true, render: (row) => escapeHtml(row.type || '') },
+        { id: 'company', label: 'Company', default: true, render: (row) => escapeHtml(row.company_name || 'Unknown') },
+        { id: 'hubspot', label: 'HubSpot Deal', default: true, render: (row) => hubspotDealCell(row) },
+        { id: 'updated', label: 'Updated', default: true, render: (row) => `<div>${escapeHtml(row.updated_at_ist || '')}</div><div class="small">${escapeHtml(row.last_action_label || 'Last action')}</div>` },
+        { id: 'reply_check', label: 'Reply Check', default: true, render: (row) => `${replyPill(row)}<div class="small">Customer waiting: ${row.customer_reverted ? 'Yes' : 'No'}</div>` },
+        { id: 'customer_reverted', label: 'Customer Reverted', default: false, render: (row) => `${yesNoUnknown(row.customer_reverted_ever, row.conversation_checked)}<div class="small">At least one customer revert</div>` },
+        { id: 'replied_same_ticket', label: 'Replied Same Ticket', default: false, render: (row) => `${yesNoUnknown(row.replied_after_customer_revert, row.conversation_checked)}<div class="small">Reply after revert</div>` },
+        { id: 'tags', label: 'Tags', default: false, render: (row) => escapeHtml(row.tags_display || '') },
+        { id: 'last_activity', label: 'Latest Activity', default: true, render: (row) => `<div><strong>${escapeHtml(row.last_activity_type || '')}</strong></div><div class="small">${escapeHtml(row.last_activity_at_ist || row.last_activity_at || '')}</div><div>${escapeHtml(row.last_activity_preview || '')}</div>` },
+        { id: 'timeline', label: 'Recent Timeline', default: false, className: 'timeline', render: (row) => escapeHtml(row.timeline_excerpt || '') },
+        { id: 'next_agenda', label: 'Next Agenda', default: true, render: (row) => `<span class="next-step">${escapeHtml(suggestNextAgenda(row))}</span><div class="small">${escapeHtml(row.sop_action || '')}</div>` },
+      ],
+      sla: [
+        { id: 'ticket', label: 'ID', default: true, className: 'id', render: (row) => `<a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a>` },
+        { id: 'subject', label: 'Subject', default: true, className: 'subject', render: (row) => `<strong>${escapeHtml(row.subject)}</strong><div class="small">Status: ${escapeHtml(row.status_label)} • Type: ${escapeHtml(row.type || '')}</div>` },
+        { id: 'sla_category', label: 'Category', default: true, render: (row) => escapeHtml(row.sla_category || '') },
+        { id: 'priority', label: 'Priority', default: true, render: (row) => escapeHtml(row.priority_label || '') },
+        { id: 'company', label: 'Company', default: true, render: (row) => escapeHtml(row.company_name || 'Unknown') },
+        { id: 'hubspot', label: 'HubSpot Deal', default: true, render: (row) => hubspotDealCell(row) },
+        { id: 'created', label: 'Created IST', default: true, render: (row) => escapeHtml(row.created_at_ist || '') },
+        { id: 'closed', label: 'Closed IST', default: true, render: (row) => escapeHtml(row.closed_at_ist || row.resolved_at_ist || '') || '<span class="small">Open</span>' },
+        { id: 'last_activity', label: 'Last Activity', default: true, render: (row) => `<div>${escapeHtml(row.last_activity_at_ist || '')}</div><div class="small">${escapeHtml(row.last_activity_type || '')}</div>` },
+        { id: 'done_by', label: 'Done By', default: true, render: (row) => escapeHtml(displayAgentName(row)) },
+        { id: 'ack', label: 'Ack SLA', default: true, render: (row) => `${slaPill(row.ack_state, row.ack_label)}<div class="small">SLA: ${escapeHtml(row.ack_sla || 'NA')}</div>` },
+        { id: 'resolution', label: 'Resolution SLA', default: true, render: (row) => `${slaPill(row.resolution_state, row.resolution_label)}<div class="small">SLA: ${escapeHtml(row.resolution_sla || 'NA')}</div>` },
+        { id: 'timeline_sla', label: 'Max Timeline', default: false, render: (row) => `${slaPill(row.max_timeline_state, row.max_timeline_label)}<div class="small">Limit: ${escapeHtml(row.max_timeline_sla || 'NA')}</div>` },
+        { id: 'owner_team', label: 'Owner Team', default: true, render: (row) => escapeHtml(row.owner_team || '') },
+        { id: 'next_agenda', label: 'Next Agenda', default: true, render: (row) => `<span class="next-step">${escapeHtml(suggestNextAgenda(row))}</span><div class="small">${escapeHtml(row.sop_action || '')}</div>` },
+      ],
+      overview: [
+        { id: 'ticket', label: 'ID', default: true, className: 'id', render: (row) => `<a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a>` },
+        { id: 'subject', label: 'Ticket Snapshot', default: true, className: 'subject', render: (row) => `<strong>${escapeHtml(row.subject)}</strong><div class="small">${escapeHtml(row._overview_reason || row.last_action_label || 'Quick snapshot')}</div>` },
+        { id: 'company', label: 'Company', default: true, render: (row) => escapeHtml(row.company_name || 'Unknown') },
+        { id: 'type', label: 'Category', default: true, render: (row) => escapeHtml(row.type || '') },
+        { id: 'status', label: 'Stage', default: true, render: (row) => `<div>${escapeHtml(row.status_label || '')}</div><div class="small">${escapeHtml(row.last_action_label || '')}</div>` },
+        { id: 'owner', label: 'Owner', default: true, render: (row) => `<div>${escapeHtml(displayAgentName(row))}</div><div class="small">${escapeHtml(row.owner_team || '')}</div>` },
+        { id: 'stuck', label: 'Where Stuck', default: true, render: (row) => `<div>${escapeHtml(overviewBottleneckText(row))}</div><div class="small">${escapeHtml(row.last_activity_type || '')}</div>` },
+        { id: 'ack', label: 'Ack SLA', default: true, render: (row) => `${slaPill(row.ack_state, row.ack_label)}<div class="small">${escapeHtml(row.ack_sla || 'NA')}</div>` },
+        { id: 'resolution', label: 'Resolution SLA', default: true, render: (row) => `${slaPill(row.resolution_state, row.resolution_label)}<div class="small">${escapeHtml(row.resolution_sla || 'NA')}</div>` },
+        { id: 'latest', label: 'Latest Update', default: true, render: (row) => `<div>${escapeHtml(row.last_activity_at_ist || row.updated_at_ist || '')}</div><div class="small">${escapeHtml(row.last_activity_preview || '')}</div>` },
+        { id: 'next_agenda', label: 'Next Agenda', default: true, render: (row) => `<span class="next-step">${escapeHtml(row._next_agenda || suggestNextAgenda(row))}</span><div class="small">${escapeHtml(row.sop_action || '')}</div>` },
+        { id: 'hubspot', label: 'HubSpot Deal', default: false, render: (row) => hubspotDealCell(row) },
+      ],
+    };
+    const columnPickerIds = { activity: 'activity-columns', sla: 'sla-columns', overview: 'overview-columns' };
+    const defaultColumnState = Object.fromEntries(Object.entries(columnConfigs).map(([view, columns]) => [view, columns.filter((column) => column.default !== false).map((column) => column.id)]));
+    const storedColumnState = (() => {
+      try { return JSON.parse(localStorage.getItem('freshdeskDashboardColumnState') || '{}'); }
+      catch (error) { return {}; }
+    })();
+    const columnState = Object.fromEntries(Object.entries(defaultColumnState).map(([view, defaults]) => {
+      const allowed = new Set((columnConfigs[view] || []).map((column) => column.id));
+      const saved = Array.isArray(storedColumnState[view]) ? storedColumnState[view].filter((value) => allowed.has(value)) : [];
+      return [view, saved.length ? saved : defaults];
+    }));
     const agentNamesByResponderId = rows.reduce((acc, row) => {
       const responderId = Number(row.responder_id || 0);
       const responderName = String(row.responder_name || '').trim();
@@ -1486,6 +1615,53 @@ def build_dashboard_html(
       const end = addDays(startOfWeek(date), 6);
       end.setHours(23, 59, 59, 999);
       return end;
+    }
+    function sameDateValue(left, right) {
+      return formatDateInputValue(left) === formatDateInputValue(right);
+    }
+    function saveColumnState() {
+      try { localStorage.setItem('freshdeskDashboardColumnState', JSON.stringify(columnState)); }
+      catch (error) { /* ignore browser storage failures */ }
+    }
+    function getVisibleColumns(view) {
+      const selected = columnState[view] || [];
+      const available = columnConfigs[view] || [];
+      const visible = available.filter((column) => selected.includes(column.id));
+      return visible.length ? visible : available.filter((column) => column.default !== false);
+    }
+    function renderColumnPicker(view) {
+      const container = document.getElementById(columnPickerIds[view]);
+      if (!container) return;
+      const selected = new Set(columnState[view] || []);
+      container.innerHTML = (columnConfigs[view] || []).map((column) => `
+        <label class="filter-item">
+          <input type="checkbox" data-column-view="${view}" value="${column.id}" ${selected.has(column.id) ? 'checked' : ''}>
+          ${escapeHtml(column.label)}
+        </label>`).join('');
+    }
+    function renderAllColumnPickers() {
+      Object.keys(columnConfigs).forEach(renderColumnPicker);
+    }
+    function rowClassForView(view, row) {
+      if (view === 'activity') return row.reply_highlight || '';
+      if (view === 'overview') {
+        if (row.sla_red_flag) return 'sla-red';
+        if (row.sla_amber_flag) return 'sla-amber';
+        return row.reply_highlight || '';
+      }
+      return row.sla_red_flag ? 'sla-red' : row.sla_amber_flag ? 'sla-amber' : '';
+    }
+    function renderDynamicTable(view, headId, bodyId, sourceRows) {
+      const head = document.getElementById(headId);
+      const body = document.getElementById(bodyId);
+      if (!head || !body) return;
+      const columns = getVisibleColumns(view);
+      head.innerHTML = `<tr>${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr>`;
+      if (!sourceRows.length) {
+        body.innerHTML = `<tr><td class="table-empty" colspan="${Math.max(1, columns.length)}">No tickets match the current filters.</td></tr>`;
+        return;
+      }
+      body.innerHTML = sourceRows.map((row) => `<tr class="${rowClassForView(view, row)}">${columns.map((column) => `<td class="${escapeHtml(column.className || '')}">${column.render(row)}</td>`).join('')}</tr>`).join('');
     }
     function isRejectedStatus(label) {
       return String(label || '').toLowerCase().includes('reject');
@@ -1589,21 +1765,36 @@ def build_dashboard_html(
       });
       return rowsToFilter;
     }
+    function computeRangeStats(sourceRows, fromDate, toDate) {
+      const createdRows = sourceRows.filter((row) => {
+        const createdAt = parseDate(row.created_at);
+        return Boolean(createdAt && createdAt >= fromDate && createdAt <= toDate);
+      });
+      const pendingFromPreviousRows = sourceRows.filter((row) => isPendingAtStart(row, fromDate));
+      const closedRows = sourceRows.filter((row) => {
+        const closedAt = closedAtForRow(row);
+        return Boolean(closedAt && closedAt >= fromDate && closedAt <= toDate);
+      });
+      const pendingAtEndRows = sourceRows.filter((row) => isPendingAtEnd(row, toDate));
+      return { createdRows, pendingFromPreviousRows, closedRows, pendingAtEndRows };
+    }
+    function categoryBucket(type) {
+      const normalized = String(type || '').toLowerCase();
+      if (normalized.includes('bug')) return 'bug';
+      if (normalized.includes('feature')) return 'feature';
+      if (normalized.includes('task')) return 'task';
+      return 'other';
+    }
     function buildOverviewStats() {
       const { fromDate, toDate } = getOverviewDateRange();
       const weekDays = buildDailyBuckets(fromDate, toDate);
       const selectedTypes = selectedValues('overview-filter-type');
       const filteredRows = rows.filter((row) => matchesMulti(row.type, selectedTypes));
-      const inRangeRows = filteredRows.filter((row) => {
-        const createdAt = parseDate(row.created_at);
-        return Boolean(createdAt && createdAt >= fromDate && createdAt <= toDate);
-      });
-      const pendingFromPreviousRows = filteredRows.filter((row) => isPendingAtStart(row, fromDate));
-      const closedInRangeRows = filteredRows.filter((row) => {
-        const closedAt = closedAtForRow(row);
-        return Boolean(closedAt && closedAt >= fromDate && closedAt <= toDate);
-      });
-      const activeRows = filteredRows.filter((row) => isPendingAtEnd(row, toDate));
+      const rangeStats = computeRangeStats(filteredRows, fromDate, toDate);
+      const inRangeRows = rangeStats.createdRows;
+      const pendingFromPreviousRows = rangeStats.pendingFromPreviousRows;
+      const closedInRangeRows = rangeStats.closedRows;
+      const activeRows = rangeStats.pendingAtEndRows;
       inRangeRows.forEach((row) => {
         const createdAt = parseDate(row.created_at);
         if (!createdAt) return;
@@ -1620,67 +1811,113 @@ def build_dashboard_html(
       const notAcceptedByTech = activeRows.filter((row) => ['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim()));
       const customerWaiting = activeRows.filter((row) => row.reply_highlight === 'overdue' || row.reply_highlight === 'waiting');
       const stalledRows = activeRows.filter((row) => {
-        const updatedAt = parseDate(row.updated_at || row.last_activity_at);
-        if (!updatedAt) return false;
-        return ((Date.now() - updatedAt.getTime()) / 3600000) >= 48;
+        const staleHours = hoursSinceLastUpdate(row);
+        return staleHours !== null && staleHours >= 48;
       });
       const categoryProgress = [...new Set(filteredRows.map((row) => row.type || 'Unspecified').filter(Boolean))]
         .map((type) => {
           const typedRows = filteredRows.filter((row) => (row.type || 'Unspecified') === type);
-          const pendingFromPrevious = typedRows.filter((row) => isPendingAtStart(row, fromDate)).length;
-          const createdInRange = typedRows.filter((row) => {
-            const createdAt = parseDate(row.created_at);
-            return Boolean(createdAt && createdAt >= fromDate && createdAt <= toDate);
-          }).length;
-          const closedInRange = typedRows.filter((row) => {
-            const closedAt = closedAtForRow(row);
-            return Boolean(closedAt && closedAt >= fromDate && closedAt <= toDate);
-          }).length;
+          const stats = computeRangeStats(typedRows, fromDate, toDate);
           return {
             label: type,
-            pendingFromPrevious,
-            createdInRange,
-            closedInRange,
-            totalMovement: pendingFromPrevious + createdInRange + closedInRange,
+            pendingFromPrevious: stats.pendingFromPreviousRows.length,
+            createdInRange: stats.createdRows.length,
+            closedInRange: stats.closedRows.length,
+            totalMovement: stats.pendingFromPreviousRows.length + stats.createdRows.length + stats.closedRows.length,
           };
         })
         .filter((item) => item.totalMovement > 0)
         .sort((left, right) => right.totalMovement - left.totalMovement || left.label.localeCompare(right.label));
       const metrics = [
-        { key: 'pending_from_previous', label: 'Pending From Previous', value: pendingFromPreviousRows.length, detail: 'Created before the selected range and still open at the start', action: 'Review carry-forward workload first so older tickets do not get buried.' },
-        { key: 'created_in_range', label: 'Created In Range', value: inRangeRows.length, detail: 'New tickets opened inside the selected range', action: 'Check incoming load by category and assign ownership quickly.' },
-        { key: 'closed_in_range', label: 'Closed In Range', value: closedInRangeRows.length, detail: 'Resolved or closed inside the selected range', action: 'Use this to measure completed work across ticket categories.' },
-        { key: 'pending_at_end', label: 'Pending At End', value: activeRows.length, detail: 'Still open by the end of the selected range', action: 'Use this as the remaining queue after new intake and closures.' },
-        { key: 'pending_sop', label: 'SOP Pending', value: pendingSop.length, detail: `${activeRows.length} active tickets in queue`, action: 'Start with red flags, then clear at-risk tickets.' },
-        { key: 'not_accepted', label: 'Not Accepted By Tech', value: notAcceptedByTech.length, detail: 'Pending At Tech or To be Picked in Next TS', action: 'Push tech acceptance or move to the correct owner/team.' },
-        { key: 'customer_waiting', label: 'Customer Waiting', value: customerWaiting.length, detail: 'Reply needed on the same ticket', action: 'Reply on the ticket or share a delay update with the customer.' },
-        { key: 'red_flags', label: 'Red Flags', value: activeRows.filter((row) => row.sla_red_flag).length, detail: 'Open SLA breaches right now', action: 'Escalate breaches first and communicate ETAs.' },
-        { key: 'stuck', label: 'Stuck 48h+', value: stalledRows.length, detail: 'No update for at least 48 hours', action: 'Review stale tickets and unblock owners immediately.' },
+        { key: 'pending_from_previous', label: 'Pending From Previous', value: pendingFromPreviousRows.length, detail: 'Carry-forward queue before this period', action: 'Start with carry-forward tickets so old issues do not slip.' },
+        { key: 'created_in_range', label: 'Created In Range', value: inRangeRows.length, detail: 'Tickets raised inside the selected period', action: 'Review incoming workload and distribute ownership quickly.' },
+        { key: 'closed_in_range', label: 'Closed In Range', value: closedInRangeRows.length, detail: 'Tickets resolved or closed in the period', action: 'Track output and closure pace by category.' },
+        { key: 'pending_at_end', label: 'Pending At End', value: activeRows.length, detail: 'Queue still open at period end', action: 'Use this as the remaining queue after intake and closures.' },
+        { key: 'pending_sop', label: 'SOP Pending', value: pendingSop.length, detail: `${activeRows.length} active tickets in queue`, action: 'Clear red flags and at-risk items first.' },
+        { key: 'not_accepted', label: 'Not Accepted By Tech', value: notAcceptedByTech.length, detail: 'Pending At Tech or To be Picked in Next TS', action: 'Push acceptance or re-assign to the right owner.' },
+        { key: 'customer_waiting', label: 'Customer Waiting', value: customerWaiting.length, detail: 'Reply still pending on same ticket', action: 'Respond on the same ticket or send ETA.' },
+        { key: 'red_flags', label: 'Red Flags', value: activeRows.filter((row) => row.sla_red_flag).length, detail: 'Current breaches in the active queue', action: 'Escalate and align owners immediately.' },
+        { key: 'stuck', label: 'Stuck 48h+', value: stalledRows.length, detail: 'No meaningful update for 48+ hours', action: 'Unblock owner and set next agenda.' },
       ];
       const filteredAttentionSource = overviewMetricFilterRows(filteredRows, activeCardFilters.overview, fromDate, toDate);
-      const attentionRows = filteredAttentionSource.map((row) => {
-        const updatedAt = parseDate(row.updated_at || row.last_activity_at);
-        const staleHours = updatedAt ? Math.round((Date.now() - updatedAt.getTime()) / 3600000) : 0;
-        let reason = '';
+      const scoredRows = filteredAttentionSource.map((row) => {
+        const staleHours = hoursSinceLastUpdate(row) || 0;
+        let reason = row.sop_action || 'Review next step';
         let severity = 0;
-        if (row.sla_red_flag) { reason = 'SLA red flag'; severity = 5; }
-        else if (row.reply_highlight === 'overdue') { reason = 'Customer waiting too long'; severity = 4; }
-        else if (['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim())) { reason = 'Awaiting tech acceptance'; severity = 3; }
-        else if (staleHours >= 48) { reason = `No update for ${staleHours}h`; severity = 2; }
+        if (row.sla_red_flag || row.ack_state === 'breached' || row.resolution_state === 'breached' || row.max_timeline_state === 'breached') { reason = 'SLA breach needs immediate action'; severity = 4; }
+        else if (row.reply_highlight === 'overdue') { reason = 'Customer is waiting for a reply'; severity = 3; }
+        else if (['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim())) { reason = 'Pending technical acceptance'; severity = 2; }
+        else if (staleHours >= 48) { reason = `No update for ${Math.round(staleHours)}h`; severity = 2; }
         else if (row.sla_amber_flag) { reason = 'At risk of delay'; severity = 1; }
-        return { row, staleHours, reason, severity };
-      }).filter((item) => item.severity > 0).sort((left, right) => right.severity - left.severity || right.staleHours - left.staleHours).slice(0, 8);
-      return { weekDays, metrics, activeRows, attentionRows, fromDate, toDate, selectedTypes, categoryProgress, pendingFromPreviousRows, closedInRangeRows };
+        return {
+          row: { ...row, _overview_reason: reason, _next_agenda: suggestNextAgenda(row), _stale_hours: staleHours },
+          staleHours,
+          reason,
+          severity,
+        };
+      }).sort((left, right) => right.severity - left.severity || right.staleHours - left.staleHours || Number(right.row.ticket_id || 0) - Number(left.row.ticket_id || 0));
+      const attentionRows = scoredRows.filter((item) => item.severity > 0).slice(0, 8);
+      const snapshotRows = scoredRows.slice(0, 30).map((item) => item.row);
+      const companyMap = {};
+      inRangeRows.forEach((row) => {
+        const companyName = String(row.company_name || 'Unknown').trim() || 'Unknown';
+        if (!companyMap[companyName]) companyMap[companyName] = { label: companyName, bug: 0, feature: 0, task: 0, other: 0, total: 0 };
+        const bucket = categoryBucket(row.type);
+        companyMap[companyName][bucket] += 1;
+        companyMap[companyName].total += 1;
+      });
+      const topCompanies = Object.values(companyMap).sort((left, right) => right.total - left.total || left.label.localeCompare(right.label)).slice(0, 10);
+      const now = new Date();
+      const lastWeekStart = startOfWeek(addDays(startOfWeek(now), -1));
+      const lastMonthBase = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const periodCards = [
+        { key: 'current_week', label: 'This Week', fromDate: startOfWeek(now), toDate: endOfWeek(now) },
+        { key: 'last_week', label: 'Last Week', fromDate: lastWeekStart, toDate: endOfWeek(lastWeekStart) },
+        { key: 'current_month', label: 'This Month', fromDate: startOfMonth(now), toDate: endOfMonth(now) },
+        { key: 'last_month', label: 'Last Month', fromDate: startOfMonth(lastMonthBase), toDate: endOfMonth(lastMonthBase) },
+      ].map((card) => {
+        const stats = computeRangeStats(filteredRows, card.fromDate, card.toDate);
+        return {
+          ...card,
+          pendingFromPrevious: stats.pendingFromPreviousRows.length,
+          createdInRange: stats.createdRows.length,
+          closedInRange: stats.closedRows.length,
+          pendingAtEnd: stats.pendingAtEndRows.length,
+          active: sameDateValue(card.fromDate, fromDate) && sameDateValue(card.toDate, toDate),
+        };
+      });
+      return { weekDays, metrics, activeRows, attentionRows, snapshotRows, fromDate, toDate, selectedTypes, categoryProgress, pendingFromPreviousRows, closedInRangeRows, topCompanies, periodCards };
     }
     function renderOverview() {
       const overview = buildOverviewStats();
-      document.getElementById('overview-helper').textContent = `Showing queue progress from ${formatDateInputValue(overview.fromDate)} to ${formatDateInputValue(overview.toDate)}. Pending from previous means tickets created before the start date and still open when the range began.`;
+      document.getElementById('overview-helper').textContent = `Selected range ${formatDateInputValue(overview.fromDate)} to ${formatDateInputValue(overview.toDate)}. Pending from previous means tickets created before the start date and still open when this range began.`;
+      document.getElementById('overview-period-cards').innerHTML = overview.periodCards.map((card) => `
+        <div class="period-card ${card.active ? 'active' : ''}">
+          <button class="period-card-button" type="button" data-overview-period="${card.key}" data-from="${formatDateInputValue(card.fromDate)}" data-to="${formatDateInputValue(card.toDate)}">
+            <div class="label">${escapeHtml(card.label)}</div>
+            <div class="value">${formatDateInputValue(card.fromDate)} → ${formatDateInputValue(card.toDate)}</div>
+            <div class="period-stats">
+              <div class="period-stat"><span class="small">Pending Prev</span><strong>${card.pendingFromPrevious}</strong></div>
+              <div class="period-stat"><span class="small">Created</span><strong>${card.createdInRange}</strong></div>
+              <div class="period-stat"><span class="small">Closed</span><strong>${card.closedInRange}</strong></div>
+              <div class="period-stat"><span class="small">Pending End</span><strong>${card.pendingAtEnd}</strong></div>
+            </div>
+          </button>
+        </div>`).join('');
+      document.querySelectorAll('[data-overview-period]').forEach((button) => {
+        button.addEventListener('click', () => {
+          document.getElementById('overview-date-from').value = button.getAttribute('data-from') || '';
+          document.getElementById('overview-date-to').value = button.getAttribute('data-to') || '';
+          render();
+        });
+      });
       document.getElementById('overview-metrics').innerHTML = overview.metrics.map((metric) => `
         <div class="overview-card ${activeCardFilters.overview === metric.key ? 'active' : ''}">
           <button class="overview-card-button" type="button" data-overview-card="${metric.key}">
             <div class="label">${escapeHtml(metric.label)}</div>
             <div class="value">${metric.value}</div>
             <div class="subvalue">${escapeHtml(metric.detail)}</div>
+            <div class="subvalue">${escapeHtml(metric.action)}</div>
           </button>
         </div>`).join('');
       document.querySelectorAll('[data-overview-card]').forEach((button) => {
@@ -1703,10 +1940,19 @@ def build_dashboard_html(
         const closedWidth = item.closedInRange ? Math.max(2, Math.round((item.closedInRange / maxCategoryValue) * 100)) : 0;
         return `<div class="category-progress-row"><div class="category-progress-label">${escapeHtml(item.label)}</div><div class="category-progress-cell"><div class="mini-track"><div class="mini-fill pending" style="width:${pendingWidth}%"></div></div><div class="category-progress-value">${item.pendingFromPrevious}</div></div><div class="category-progress-cell"><div class="mini-track"><div class="mini-fill created" style="width:${createdWidth}%"></div></div><div class="category-progress-value">${item.createdInRange}</div></div><div class="category-progress-cell"><div class="mini-track"><div class="mini-fill closed" style="width:${closedWidth}%"></div></div><div class="category-progress-value">${item.closedInRange}</div></div></div>`;
       })].join('') : '<div class="attention-item"><div class="attention-title">No category movement in this range</div><div class="attention-meta">Try a wider date range or remove the ticket category filter.</div></div>';
+      document.getElementById('overview-company-bars').innerHTML = overview.topCompanies.length ? [`<div class="company-progress-head"><div>Company</div><div>Raised Tickets Mix</div><div>Total</div></div>`, ...overview.topCompanies.map((item) => {
+        const total = Math.max(1, item.total);
+        const bugWidth = Math.round((item.bug / total) * 100);
+        const featureWidth = Math.round((item.feature / total) * 100);
+        const taskWidth = Math.round((item.task / total) * 100);
+        const otherWidth = Math.max(0, 100 - bugWidth - featureWidth - taskWidth);
+        return `<div class="company-progress-row"><div class="category-progress-label">${escapeHtml(item.label)}</div><div class="company-progress-cell"><div class="stacked-track"><div class="stack-segment bug" style="width:${bugWidth}%"></div><div class="stack-segment feature" style="width:${featureWidth}%"></div><div class="stack-segment task" style="width:${taskWidth}%"></div><div class="stack-segment other" style="width:${otherWidth}%"></div></div><div class="small">Bug ${item.bug} • Feature ${item.feature} • Task ${item.task} • Other ${item.other}</div></div><div class="category-progress-value">${item.total}</div></div>`;
+      })].join('') : '<div class="attention-item"><div class="attention-title">No company chart data in this range</div><div class="attention-meta">Top companies are based on tickets created in the selected duration.</div></div>';
+      renderDynamicTable('overview', 'overview-table-head', 'overview-table-body', overview.snapshotRows);
       document.getElementById('overview-attention').innerHTML = overview.attentionRows.map((item) => {
         const row = item.row;
-        return `<div class="attention-item"><div class="attention-title"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">#${row.ticket_id}</a> — ${escapeHtml(row.subject)}</div><div class="attention-meta">Status: ${escapeHtml(row.status_label)} • Done By: ${escapeHtml(displayAgentName(row))} • Last updated: ${escapeHtml(row.updated_at_ist || row.last_activity_at_ist || '-')}</div><div class="attention-reason">${escapeHtml(item.reason)}</div></div>`;
-      }).join('') || '<div class="attention-item"><div class="attention-title">No stuck or delayed tickets in this range</div><div class="attention-meta">Good sign — no immediate follow-up needed from this weekly view.</div></div>';
+        return `<div class="attention-item"><div class="attention-title"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">#${row.ticket_id}</a> — ${escapeHtml(row.subject)}</div><div class="attention-meta">Status: ${escapeHtml(row.status_label)} • Owner: ${escapeHtml(displayAgentName(row))} • Last updated: ${escapeHtml(row.updated_at_ist || row.last_activity_at_ist || '-')}</div><div class="attention-reason">${escapeHtml(item.reason)}</div></div>`;
+      }).join('') || '<div class="attention-item"><div class="attention-title">No stuck or delayed tickets in this range</div><div class="attention-meta">Good sign — no immediate follow-up needed from this period view.</div></div>';
     }
     function renderCheckboxGroup(containerId, options, allLabel, searchable = false) {
       const container = document.getElementById(containerId);
@@ -1737,6 +1983,30 @@ def build_dashboard_html(
     function yesNoUnknown(value, checked) {
       if (!checked) return '<span class="small">Not checked</span>';
       return value ? 'Yes' : 'No';
+    }
+    function hoursSinceLastUpdate(row) {
+      const updatedAt = parseDate(row.updated_at || row.last_activity_at);
+      if (!updatedAt) return null;
+      return Math.round(((Date.now() - updatedAt.getTime()) / 3600000) * 10) / 10;
+    }
+    function overviewBottleneckText(row) {
+      if (row.sla_red_flag || row.ack_state === 'breached' || row.resolution_state === 'breached' || row.max_timeline_state === 'breached') return 'SLA breach / red flag';
+      if (row.sla_amber_flag) return 'At risk of breach';
+      if (row.reply_highlight === 'overdue') return 'Customer waiting for reply';
+      if (row.reply_highlight === 'waiting') return 'Reply follow-up pending';
+      if (['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim())) return 'Pending technical acceptance';
+      const staleHours = hoursSinceLastUpdate(row);
+      if (staleHours !== null && staleHours >= 48) return `No update for ${staleHours}h`;
+      return row.last_action_label || row.last_activity_type || 'In progress';
+    }
+    function suggestNextAgenda(row) {
+      if (row.sla_red_flag || row.ack_state === 'breached' || row.resolution_state === 'breached') return 'Escalate and share ETA';
+      if (row.sla_amber_flag) return 'Review risk and re-align owner';
+      if (row.reply_highlight === 'overdue' || row.reply_highlight === 'waiting') return 'Reply on the same ticket';
+      if (['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim())) return 'Push tech acceptance';
+      const staleHours = hoursSinceLastUpdate(row);
+      if (staleHours !== null && staleHours >= 48) return 'Follow up with owner';
+      return row.sop_action || 'Monitor progress';
     }
     function slaPill(state, label) { return `<span class="pill ${state || 'na'}">${label || 'NA'}</span>`; }
     function matchesSla(row, selections) {
@@ -1825,10 +2095,8 @@ def build_dashboard_html(
       const slaRows = filteredRows('sla');
       renderCards(baseActivityRows, baseSlaRows);
       renderOverview();
-      document.getElementById('activity-table-body').innerHTML = activityRows.map((row) => `
-        <tr class="${row.reply_highlight}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Priority: ${escapeHtml(row.priority_label)} • Group: ${row.group_id || '-'} • Agent: ${escapeHtml(displayAgentName(row))}</div></td><td>${escapeHtml(row.status_label)}</td><td>${escapeHtml(row.type || '')}</td><td>${escapeHtml(row.company_name || 'Unknown')}</td><td>${hubspotDealCell(row)}</td><td>${escapeHtml(row.updated_at || '')}</td><td>${replyPill(row)}<div class="small">Current waiting: ${row.customer_reverted ? 'Yes' : 'No'}</div></td><td>${yesNoUnknown(row.customer_reverted_ever, row.conversation_checked)}<div class="small">At least one customer revert</div></td><td>${yesNoUnknown(row.replied_after_customer_revert, row.conversation_checked)}<div class="small">Reply after revert</div></td><td>${escapeHtml(row.tags_display || '')}</td><td><div><strong>${escapeHtml(row.last_activity_type || '')}</strong></div><div class="small">${escapeHtml(row.last_activity_at || '')}</div><div>${escapeHtml(row.last_activity_preview || '')}</div></td><td class="timeline">${escapeHtml(row.timeline_excerpt || '')}</td></tr>`).join('');
-      document.getElementById('sla-table-body').innerHTML = slaRows.map((row) => `
-        <tr class="${row.sla_red_flag ? 'sla-red' : row.sla_amber_flag ? 'sla-amber' : ''}"><td class="id"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a></td><td class="subject"><strong>${escapeHtml(row.subject)}</strong><div class="small">Status: ${escapeHtml(row.status_label)} • Type: ${escapeHtml(row.type || '')}</div></td><td>${escapeHtml(row.sla_category || '')}</td><td>${escapeHtml(row.priority_label || '')}</td><td>${escapeHtml(row.company_name || 'Unknown')}</td><td>${hubspotDealCell(row)}</td><td>${escapeHtml(row.created_at_ist || '')}</td><td>${escapeHtml(row.closed_at_ist || row.resolved_at_ist || '') || '<span class="small">Open</span>'}</td><td><div>${escapeHtml(row.last_activity_at_ist || '')}</div><div class="small">${escapeHtml(row.last_activity_type || '')}</div></td><td>${escapeHtml(displayAgentName(row))}</td><td>${slaPill(row.ack_state, row.ack_label)}<div class="small">SLA: ${escapeHtml(row.ack_sla || 'NA')}</div></td><td>${slaPill(row.resolution_state, row.resolution_label)}<div class="small">SLA: ${escapeHtml(row.resolution_sla || 'NA')}</div></td><td>${slaPill(row.max_timeline_state, row.max_timeline_label)}<div class="small">Limit: ${escapeHtml(row.max_timeline_sla || 'NA')}</div></td><td>${escapeHtml(row.owner_team || '')}</td></tr>`).join('');
+      renderDynamicTable('activity', 'activity-table-head', 'activity-table-body', activityRows);
+      renderDynamicTable('sla', 'sla-table-head', 'sla-table-body', slaRows);
     }
     function wireGroup(containerId) {
       document.getElementById(containerId).addEventListener('change', (event) => {
@@ -1838,6 +2106,23 @@ def build_dashboard_html(
         if (target.value === 'all' && target.checked) others.forEach((input) => { input.checked = false; });
         else if (target.value !== 'all' && target.checked && allInput) allInput.checked = false;
         if (allInput && others.every((input) => !input.checked)) allInput.checked = true;
+        render();
+      });
+    }
+    function wireColumnPicker(view) {
+      const container = document.getElementById(columnPickerIds[view]);
+      if (!container) return;
+      container.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) return;
+        const selected = new Set(columnState[view] || []);
+        if (target.checked) selected.add(target.value);
+        else selected.delete(target.value);
+        const available = (columnConfigs[view] || []).map((column) => column.id);
+        if (!selected.size && available.length) selected.add(available[0]);
+        columnState[view] = available.filter((columnId) => selected.has(columnId));
+        saveColumnState();
+        renderColumnPicker(view);
         render();
       });
     }
@@ -1884,7 +2169,9 @@ def build_dashboard_html(
     renderCheckboxGroup('sla-filter-company', [...new Set(rows.map((row) => row.company_name || 'Unknown').filter(Boolean))].sort(), 'All companies', true);
     renderCheckboxGroup('sla-filter-sla', ['red_flag', 'ack_breached', 'resolution_breached', 'max_timeline_breached', 'at_risk'], 'All SLA flags');
     renderCheckboxGroup('overview-filter-type', [...new Set(rows.map((row) => row.type).filter(Boolean))].sort(), 'All ticket categories');
+    renderAllColumnPickers();
     ['activity-filter-highlight','activity-filter-status','activity-filter-type','activity-filter-company','sla-filter-status','sla-filter-type','sla-filter-company','sla-filter-sla','overview-filter-type'].forEach(wireGroup);
+    ['activity','sla','overview'].forEach(wireColumnPicker);
     ['activity-filter-company','sla-filter-company'].forEach(wireFilterSearch);
     ['activity-date-from','activity-date-to','sla-date-from','sla-date-to','overview-date-from','overview-date-to'].forEach(wireDatePicker);
     document.getElementById('activity-search').addEventListener('input', render);
@@ -1932,7 +2219,7 @@ def build_dashboard_html(
     __REFRESH_JS__
     document.getElementById('overview-date-from').value = formatDateInputValue(startOfWeek(new Date()));
     document.getElementById('overview-date-to').value = formatDateInputValue(endOfWeek(new Date()));
-    setView('activity');
+    setView('overview');
   </script>
 </body>
 </html>
