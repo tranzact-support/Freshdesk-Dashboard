@@ -5,9 +5,12 @@ import argparse
 import base64
 import csv
 import html
+import http.client
 import json
 import os
 import re
+import socket
+import ssl
 import sys
 import time
 import urllib.error
@@ -48,6 +51,7 @@ DEFAULT_CONVERSATION_WORKERS = 8
 DEFAULT_HUBSPOT_ENV_FILE = "/Users/shishirraj/.config/hubspot.env"
 DEFAULT_HUBSPOT_UI_DOMAIN = "app.hubspot.com"
 DEFAULT_HUBSPOT_DEAL_URL_FIELD = "cf_hubspot_deal_url"
+DEFAULT_HTTP_TIMEOUT_SECONDS = 120
 
 TICKET_TYPE_ALIASES = {
     "Feature Request": "Feature Idea",
@@ -189,6 +193,27 @@ class FreshdeskClient:
         self.max_retries = max_retries
         self.retry_delay_seconds = retry_delay_seconds
 
+    def _is_transient_exception(self, exc: BaseException) -> bool:
+        if isinstance(exc, (TimeoutError, socket.timeout, ConnectionResetError, ssl.SSLError)):
+            return True
+        if isinstance(exc, http.client.HTTPException):
+            return True
+        if isinstance(exc, urllib.error.URLError):
+            reason = getattr(exc, "reason", None)
+            return isinstance(
+                reason,
+                (
+                    TimeoutError,
+                    socket.timeout,
+                    ConnectionResetError,
+                    ssl.SSLError,
+                    OSError,
+                ),
+            ) or reason is None
+        if isinstance(exc, OSError):
+            return True
+        return False
+
     def request(
         self, method: str, path: str, payload: Optional[Dict[str, object]] = None
     ) -> Tuple[int, Optional[object], str]:
@@ -204,7 +229,7 @@ class FreshdeskClient:
         req = urllib.request.Request(url, data=body, headers=headers, method=method)
         for attempt in range(self.max_retries + 1):
             try:
-                with urllib.request.urlopen(req) as resp:
+                with urllib.request.urlopen(req, timeout=DEFAULT_HTTP_TIMEOUT_SECONDS) as resp:
                     raw = resp.read().decode("utf-8", errors="replace")
                     parsed = json.loads(raw) if raw else None
                     return resp.status, parsed, raw
@@ -226,8 +251,8 @@ class FreshdeskClient:
                     time.sleep(max(delay, self.retry_delay_seconds))
                     continue
                 return exc.code, parsed, raw
-            except urllib.error.URLError as exc:
-                if attempt < self.max_retries:
+            except Exception as exc:
+                if attempt < self.max_retries and self._is_transient_exception(exc):
                     time.sleep(self.retry_delay_seconds * (attempt + 1))
                     continue
                 raise HttpError(f"Freshdesk request failed: {exc}") from exc
@@ -884,7 +909,12 @@ def enrich_hubspot_context(
         }
     )
     direct_lookup_results: Dict[str, Tuple[str, str, int]] = {}
-    for freshdesk_company_name in company_names_missing_deals:
+    for index, freshdesk_company_name in enumerate(company_names_missing_deals, start=1):
+        if index == 1 or index % 25 == 0 or index == len(company_names_missing_deals):
+            print(
+                f"HUBSPOT company lookup {index}/{len(company_names_missing_deals)} name={freshdesk_company_name}",
+                file=sys.stderr,
+            )
         cache_key = normalize_company_lookup_name(freshdesk_company_name)
         cached_value = direct_company_cache.get(cache_key, "")
         cached_parts = [part.strip() for part in cached_value.split("|")]
@@ -927,6 +957,7 @@ def enrich_hubspot_context(
         except freshdesk_hubspot_sync.HttpError as exc:
             fetch_errors.append(f"hubspot company {freshdesk_company_name}: {exc}")
 
+    synced_ticket_count = 0
     for ticket in tickets:
         ticket_id = as_int(ticket.get("id")) or 0
         if ticket_id <= 0:
@@ -952,6 +983,12 @@ def enrich_hubspot_context(
                     best_deal_url,
                     current_field_url,
                 ):
+                    synced_ticket_count += 1
+                    if synced_ticket_count == 1 or synced_ticket_count % 50 == 0:
+                        print(
+                            f"SYNC hubspot_deal_url ticket={ticket_id} updated={synced_ticket_count}",
+                            file=sys.stderr,
+                        )
                     custom_fields = ticket.get("custom_fields") if isinstance(ticket.get("custom_fields"), dict) else {}
                     ticket["custom_fields"] = dict(custom_fields or {})
                     ticket["custom_fields"][hubspot_deal_url_field] = best_deal_url
