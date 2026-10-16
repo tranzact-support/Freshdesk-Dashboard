@@ -1306,22 +1306,39 @@ def build_dashboard_html(
     .column-box { min-width:220px; }
     .table-empty { text-align:center; color:#94a3b8; padding:20px; }
     .overview-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:16px; margin-top:16px; }
-    .period-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:16px; margin-top:16px; }
-    .period-card { background:#111827; border:1px solid #334155; border-radius:12px; padding:0; overflow:hidden; }
-    .period-card-button { width:100%; border:0; background:transparent; color:inherit; text-align:left; padding:16px; cursor:pointer; }
-    .period-card.active { border-color:#2563eb; box-shadow: inset 0 0 0 1px #2563eb; }
-    .period-card-button:hover { background:#172033; }
-    .period-card .label { color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
-    .period-card .value { font-size:18px; font-weight:700; margin-top:8px; }
-    .period-stats { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:8px; margin-top:12px; }
-    .period-stat { background:#0b1220; border:1px solid #1e293b; border-radius:10px; padding:8px; }
-    .period-stat strong { display:block; font-size:16px; }
     .overview-card, .chart-card { background:#111827; border:1px solid #334155; border-radius:12px; padding:16px; min-width:0; overflow:hidden; }
     .overview-card .label, .chart-card .label, .attention-item .label { color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
     .overview-card .value { font-size:32px; font-weight:700; margin-top:8px; }
     .overview-card .subvalue, .chart-card .subvalue { color:#94a3b8; font-size:12px; margin-top:8px; }
     .overview-card-button { width:100%; border:0; background:transparent; color:inherit; text-align:left; padding:0; cursor:pointer; }
     .overview-card.active { border-color:#2563eb; box-shadow: inset 0 0 0 1px #2563eb; }
+    .progress-grid { grid-template-columns:repeat(4, minmax(0, 1fr)); }
+    .attention-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+    .overview-card { padding:0; }
+    .overview-card-button { padding:20px; border-radius:12px; }
+    .overview-card-button:hover { background:#172033; }
+    .overview-card-button:focus-visible { outline:2px solid #93c5fd; outline-offset:-3px; }
+    .overview-card .label { text-transform:none; letter-spacing:0; color:#cbd5e1; font-size:14px; }
+    .metric-line { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-top:10px; }
+    .metric-line .value { margin-top:0; font-size:36px; line-height:1.2; }
+    .metric-comparison { color:#94a3b8; font-size:12px; }
+    .metric-comparison strong { color:#cbd5e1; font-weight:500; }
+    .metric-created .value { color:#93c5fd; }
+    .metric-closed .value { color:#86efac; }
+    .metric-waiting { border-left:3px solid #fbbf24; }
+    .metric-waiting .value { color:#fcd34d; }
+    .metric-breached { border-left:3px solid #f87171; }
+    .metric-breached .value { color:#fca5a5; }
+    .date-field { display:grid; gap:5px; color:#94a3b8; font-size:12px; }
+    .overview-controls button[aria-pressed="true"] { background:#1d4ed8; border-color:#3b82f6; color:white; }
+    .overview-controls .date-shortcuts { display:flex; gap:8px; flex-wrap:wrap; align-self:end; }
+    .overview-controls .filter-box { align-self:end; }
+    .overview-results { scroll-margin-top:20px; }
+    .overview-results .section-copy { margin-bottom:12px; }
+    .overview-details > summary { cursor:pointer; font-size:16px; color:#cbd5e1; padding:16px 0; }
+    .overview-details > summary:hover { color:#93c5fd; }
+    @media (max-width: 1000px) { .progress-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 540px) { .progress-grid, .attention-grid { grid-template-columns:1fr; } }
     .overview-section { margin-top:18px; }
     .section-title { margin:0 0 12px; font-size:18px; }
     .overview-controls { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:12px 0 6px; }
@@ -1399,7 +1416,7 @@ def build_dashboard_html(
       </div>
     </div>
     <div class="tabs">
-      <button class="tab-btn active" id="tab-overview">Weekly Ticket Activity</button>
+      <button class="tab-btn active" id="tab-overview">Ticket Progress</button>
       <button class="tab-btn" id="tab-sla">Ticket Pipeline</button>
       <button class="tab-btn" id="tab-activity">Email Alert</button>
     </div>
@@ -1467,33 +1484,50 @@ def build_dashboard_html(
     </div>
     <div id="overview-view" class="hidden">
       <div class="overview-section">
-        <h2 class="section-title">Weekly Ticket Activity</h2>
+        <h2 class="section-title">Ticket Progress</h2>
         <div class="overview-controls">
-          <input class="date-input" id="overview-date-from" type="date" title="Overview from">
-          <input class="date-input" id="overview-date-to" type="date" title="Overview to">
+          <label class="date-field">From<input class="date-input" id="overview-date-from" type="date"></label>
+          <label class="date-field">To<input class="date-input" id="overview-date-to" type="date"></label>
+          <div class="date-shortcuts">
           <button type="button" id="overview-current-week">This Week</button>
           <button type="button" id="overview-last-week">Last Week</button>
           <button type="button" id="overview-current-month">This Month</button>
           <button type="button" id="overview-last-month">Last Month</button>
+          </div>
           <details class="filter-box"><summary>Ticket Category</summary><div class="filter-list" id="overview-filter-type"></div></details>
         </div>
         <div class="overview-helper" id="overview-helper"></div>
-        <div class="period-grid" id="overview-period-cards"></div>
-        <div class="overview-grid" id="overview-metrics"></div>
+        <div class="overview-grid progress-grid" id="overview-metrics"></div>
       </div>
       <div class="overview-section">
-        <h2 class="section-title">Graphs</h2>
+        <h2 class="section-title">Needs attention</h2>
+        <div class="section-copy">Currently open tickets created in the selected dates. Click a number to review the tickets. A ticket can appear in both groups.</div>
+        <div class="overview-grid attention-grid" id="overview-attention-metrics"></div>
+      </div>
+      <div class="overview-section overview-results hidden" id="overview-results">
+        <div class="section-head">
+          <h2 class="section-title" id="overview-results-title">Matching tickets</h2>
+          <button type="button" id="overview-clear-selection">Clear selection</button>
+        </div>
+        <div class="section-copy" id="overview-results-copy"></div>
+        <div class="table-wrap"><table>
+          <thead id="overview-results-head"></thead>
+          <tbody id="overview-results-body"></tbody>
+        </table></div>
+      </div>
+      <details class="overview-section overview-details">
+        <summary>Trends and breakdowns</summary>
         <div class="overview-grid graphs-grid">
           <div class="chart-card">
             <div class="label">Opened vs Closed</div>
-            <div class="subvalue">Daily weekly trend inside the selected range</div>
+            <div class="subvalue">New and closed tickets by day in the selected dates</div>
             <div class="line-chart" id="weekly-open-close-chart"></div>
             <div class="line-labels" id="weekly-open-close-labels"></div>
             <div class="line-legend"><span><span class="legend-dot" style="background:#2563eb"></span>Opened</span><span><span class="legend-dot" style="background:#22c55e"></span>Closed / Resolved</span></div>
           </div>
           <div class="chart-card">
             <div class="label">Category Queue Progress</div>
-            <div class="subvalue">Pending from previous, created, and closed by ticket category</div>
+            <div class="subvalue">Open at start, new tickets, and closed tickets by category</div>
             <div class="mini-bars" id="overview-category-bars"></div>
             <div class="line-legend"><span><span class="legend-dot" style="background:#f59e0b"></span>Pending From Previous</span><span><span class="legend-dot" style="background:#2563eb"></span>Created In Range</span><span><span class="legend-dot" style="background:#22c55e"></span>Closed In Range</span></div>
           </div>
@@ -1504,11 +1538,8 @@ def build_dashboard_html(
             <div class="line-legend"><span><span class="legend-dot" style="background:#ef4444"></span>Bug</span><span><span class="legend-dot" style="background:#8b5cf6"></span>Feature Idea</span><span><span class="legend-dot" style="background:#0ea5e9"></span>Task</span><span><span class="legend-dot" style="background:#64748b"></span>Other</span></div>
           </div>
         </div>
-      </div>
-      <div class="overview-section">
-        <h2 class="section-title">Needs Attention</h2>
-        <div class="attention-list" id="overview-attention"></div>
-      </div>
+      </details>
+
     </div>
   </div>
   <script>
@@ -1824,15 +1855,12 @@ def build_dashboard_html(
         });
       }
       if (metricKey === 'pending_at_end') return rowsToFilter.filter((row) => isPendingAtEnd(row, toDate));
-      if (metricKey === 'pending_sop') return rowsToFilter.filter((row) => isPendingAtEnd(row, toDate) && isSopPendingRow(row));
-      if (metricKey === 'not_accepted') return rowsToFilter.filter((row) => isPendingAtEnd(row, toDate) && ['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim()));
-      if (metricKey === 'customer_waiting') return rowsToFilter.filter((row) => isPendingAtEnd(row, toDate) && (row.reply_highlight === 'overdue' || row.reply_highlight === 'waiting'));
-      if (metricKey === 'red_flags') return rowsToFilter.filter((row) => isPendingAtEnd(row, toDate) && row.sla_red_flag);
-      if (metricKey === 'stuck') return rowsToFilter.filter((row) => {
-        if (!isPendingAtEnd(row, toDate)) return false;
-        const updatedAt = parseDate(row.updated_at || row.last_activity_at);
-        return updatedAt && ((Date.now() - updatedAt.getTime()) / 3600000) >= 48;
+      const openCreatedRows = rowsToFilter.filter((row) => {
+        const createdAt = parseDate(row.created_at);
+        return createdAt && createdAt >= fromDate && createdAt <= toDate && !isClosedLikeStatus(row.status_label);
       });
+      if (metricKey === 'customer_waiting') return openCreatedRows.filter((row) => row.reply_highlight === 'overdue' || row.reply_highlight === 'waiting');
+      if (metricKey === 'red_flags') return openCreatedRows.filter((row) => row.sla_red_flag);
       return rowsToFilter;
     }
     function computeRangeStats(sourceRows, fromDate, toDate) {
@@ -1855,12 +1883,35 @@ def build_dashboard_html(
       if (normalized.includes('task')) return 'task';
       return 'other';
     }
+    function overviewComparisonRange(fromDate, toDate) {
+      const asOf = parseDate(summary.generated_at) || new Date();
+      const effectiveEnd = new Date(Math.min(toDate.getTime(), asOf.getTime()));
+      const fullMonth = sameDateValue(fromDate, startOfMonth(fromDate)) && sameDateValue(toDate, endOfMonth(fromDate));
+      let previousStart, previousEnd;
+      if (fullMonth) {
+        previousStart = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, 1);
+        previousEnd = endOfMonth(previousStart);
+      } else {
+        previousEnd = addDays(fromDate, -1);
+        previousEnd.setHours(23, 59, 59, 999);
+        const days = Math.round((Date.UTC(toDate.getFullYear(), toDate.getMonth(), toDate.getDate()) - Date.UTC(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate())) / 86400000) + 1;
+        previousStart = addDays(fromDate, -days);
+      }
+      const partial = effectiveEnd < toDate;
+      if (partial) previousEnd = new Date(Math.min(previousEnd.getTime(), previousStart.getTime() + Math.max(0, effectiveEnd - fromDate)));
+      return { fromDate: previousStart, toDate: previousEnd, effectiveEnd, partial, label:fullMonth ? 'vs previous month' : Math.round((toDate - fromDate) / 86400000) === 7 ? 'vs previous week' : 'vs previous period' };
+    }
+    function formatOverviewDate(date) {
+      return date.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
+    }
     function buildOverviewStats() {
       const { fromDate, toDate } = getOverviewDateRange();
       const weekDays = buildDailyBuckets(fromDate, toDate);
       const selectedTypes = selectedValues('overview-filter-type');
       const filteredRows = rows.filter((row) => matchesMulti(row.type, selectedTypes));
-      const rangeStats = computeRangeStats(filteredRows, fromDate, toDate);
+      const comparison = overviewComparisonRange(fromDate, toDate);
+      const rangeStats = computeRangeStats(filteredRows, fromDate, comparison.effectiveEnd);
+      const previousStats = computeRangeStats(filteredRows, comparison.fromDate, comparison.toDate);
       const inRangeRows = rangeStats.createdRows;
       const pendingFromPreviousRows = rangeStats.pendingFromPreviousRows;
       const closedInRangeRows = rangeStats.closedRows;
@@ -1877,13 +1928,6 @@ def build_dashboard_html(
         const closedBucket = weekDays.find((item) => item.key === formatDateInputValue(closedAt));
         if (closedBucket) closedBucket.closed += 1;
       });
-      const pendingSop = activeRows.filter((row) => isSopPendingRow(row));
-      const notAcceptedByTech = activeRows.filter((row) => ['Pending At Tech', 'To be Picked in Next TS'].includes(String(row.status_label || '').trim()));
-      const customerWaiting = activeRows.filter((row) => row.reply_highlight === 'overdue' || row.reply_highlight === 'waiting');
-      const stalledRows = activeRows.filter((row) => {
-        const staleHours = hoursSinceLastUpdate(row);
-        return staleHours !== null && staleHours >= 48;
-      });
       const categoryProgress = [...new Set(filteredRows.map((row) => row.type || 'Unspecified').filter(Boolean))]
         .map((type) => {
           const typedRows = filteredRows.filter((row) => (row.type || 'Unspecified') === type);
@@ -1899,19 +1943,17 @@ def build_dashboard_html(
         .filter((item) => item.totalMovement > 0)
         .sort((left, right) => right.totalMovement - left.totalMovement || left.label.localeCompare(right.label));
       const metrics = [
-        { key: 'pending_from_previous', label: 'Pending From Previous', value: pendingFromPreviousRows.length, detail: 'Carry-forward queue before this period', action: 'Start with carry-forward tickets so old issues do not slip.' },
-        { key: 'created_in_range', label: 'Created In Range', value: inRangeRows.length, detail: 'Tickets raised inside the selected period', action: 'Review incoming workload and distribute ownership quickly.' },
-        { key: 'closed_in_range', label: 'Closed In Range', value: closedInRangeRows.length, detail: 'Tickets resolved or closed in the period', action: 'Track output and closure pace by category.' },
-        { key: 'pending_at_end', label: 'Pending At End', value: activeRows.length, detail: 'Queue still open at period end', action: 'Use this as the remaining queue after intake and closures.' },
-        { key: 'pending_sop', label: 'SOP Pending', value: pendingSop.length, detail: 'Tickets still sitting in the core Pending stage', action: 'Work the pending queue before it spills into breach buckets.' },
-        { key: 'not_accepted', label: 'Not Accepted By Tech', value: notAcceptedByTech.length, detail: 'Pending At Tech or To be Picked in Next TS', action: 'Push acceptance or re-assign to the right owner.' },
-        { key: 'customer_waiting', label: 'Customer Waiting', value: customerWaiting.length, detail: 'Reply still pending on same ticket', action: 'Respond on the same ticket or send ETA.' },
-        { key: 'red_flags', label: 'Red Flags', value: activeRows.filter((row) => row.sla_red_flag).length, detail: 'Current breaches in the active queue', action: 'Escalate and align owners immediately.' },
-        { key: 'stuck', label: 'Stuck 48h+', value: stalledRows.length, detail: 'No meaningful update for 48+ hours', action: 'Unblock owner and set next agenda.' },
+        { key:'pending_from_previous', label:'Open at start', value:pendingFromPreviousRows.length, previous:previousStats.pendingFromPreviousRows.length, detail:'Tickets already open before this period', className:'' },
+        { key:'created_in_range', label:'New tickets', value:inRangeRows.length, previous:previousStats.createdRows.length, detail:'Tickets created during this period', className:'metric-created' },
+        { key:'closed_in_range', label:'Closed tickets', value:closedInRangeRows.length, previous:previousStats.closedRows.length, detail:'Resolved or closed during this period', className:'metric-closed' },
+        { key:'pending_at_end', label:'Open at end', value:activeRows.length, previous:previousStats.pendingAtEndRows.length, detail:comparison.partial ? 'Still open as of the latest refresh' : 'Tickets still open when this period ended', className:'' },
       ];
-      const filteredAttentionSource = overviewMetricFilterRows(filteredRows, activeCardFilters.overview, fromDate, toDate);
-      const scoredRows = scoreSnapshotRows(filteredAttentionSource);
-      const attentionRows = scoredRows.filter((item) => item.severity > 0).slice(0, 8);
+      const attentionMetrics = [
+        { key:'customer_waiting', label:'Awaiting reply', detail:'Reply to the customer on the same ticket', className:'metric-waiting' },
+        { key:'red_flags', label:'SLA breached', detail:'Review the delay and decide the next step', className:'metric-breached' },
+      ].map((metric) => ({ ...metric, value:overviewMetricFilterRows(filteredRows, metric.key, fromDate, comparison.effectiveEnd).length }));
+      const selectedMetric = [...metrics, ...attentionMetrics].find((metric) => metric.key === activeCardFilters.overview);
+      const selectedRows = selectedMetric ? overviewMetricFilterRows(filteredRows, selectedMetric.key, fromDate, comparison.effectiveEnd) : [];
       const companyMap = {};
       inRangeRows.forEach((row) => {
         const companyName = String(row.company_name || 'Unknown').trim() || 'Unknown';
@@ -1921,66 +1963,53 @@ def build_dashboard_html(
         companyMap[companyName].total += 1;
       });
       const topCompanies = Object.values(companyMap).sort((left, right) => right.total - left.total || left.label.localeCompare(right.label)).slice(0, 10);
-      const now = new Date();
-      const lastWeekStart = startOfWeek(addDays(startOfWeek(now), -1));
-      const lastMonthBase = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const periodCards = [
-        { key: 'current_week', label: 'This Week', fromDate: startOfWeek(now), toDate: endOfWeek(now) },
-        { key: 'last_week', label: 'Last Week', fromDate: lastWeekStart, toDate: endOfWeek(lastWeekStart) },
-        { key: 'current_month', label: 'This Month', fromDate: startOfMonth(now), toDate: endOfMonth(now) },
-        { key: 'last_month', label: 'Last Month', fromDate: startOfMonth(lastMonthBase), toDate: endOfMonth(lastMonthBase) },
-      ].map((card) => {
-        const stats = computeRangeStats(filteredRows, card.fromDate, card.toDate);
-        return {
-          ...card,
-          pendingFromPrevious: stats.pendingFromPreviousRows.length,
-          createdInRange: stats.createdRows.length,
-          closedInRange: stats.closedRows.length,
-          pendingAtEnd: stats.pendingAtEndRows.length,
-          active: sameDateValue(card.fromDate, fromDate) && sameDateValue(card.toDate, toDate),
-        };
-      });
-      return { weekDays, metrics, activeRows, attentionRows, fromDate, toDate, selectedTypes, categoryProgress, pendingFromPreviousRows, closedInRangeRows, topCompanies, periodCards };
+      return { weekDays, metrics, attentionMetrics, selectedMetric, selectedRows, fromDate, toDate, comparison, categoryProgress, topCompanies };
     }
     function renderOverview() {
       const overview = buildOverviewStats();
-      document.getElementById('overview-helper').textContent = `Selected range ${formatDateInputValue(overview.fromDate)} to ${formatDateInputValue(overview.toDate)}. Pending from previous means tickets created before the start date and still open when this range began.`;
-      document.getElementById('overview-period-cards').innerHTML = overview.periodCards.map((card) => `
-        <div class="period-card ${card.active ? 'active' : ''}">
-          <button class="period-card-button" type="button" data-overview-period="${card.key}" data-from="${formatDateInputValue(card.fromDate)}" data-to="${formatDateInputValue(card.toDate)}">
-            <div class="label">${escapeHtml(card.label)}</div>
-            <div class="value">${formatDateInputValue(card.fromDate)} → ${formatDateInputValue(card.toDate)}</div>
-            <div class="period-stats">
-              <div class="period-stat"><span class="small">Pending Prev</span><strong>${card.pendingFromPrevious}</strong></div>
-              <div class="period-stat"><span class="small">Created</span><strong>${card.createdInRange}</strong></div>
-              <div class="period-stat"><span class="small">Closed</span><strong>${card.closedInRange}</strong></div>
-              <div class="period-stat"><span class="small">Pending End</span><strong>${card.pendingAtEnd}</strong></div>
-            </div>
-          </button>
-        </div>`).join('');
-      document.querySelectorAll('[data-overview-period]').forEach((button) => {
-        button.addEventListener('click', () => {
-          document.getElementById('overview-date-from').value = button.getAttribute('data-from') || '';
-          document.getElementById('overview-date-to').value = button.getAttribute('data-to') || '';
-          render();
-        });
-      });
-      document.getElementById('overview-metrics').innerHTML = overview.metrics.map((metric) => `
-        <div class="overview-card ${activeCardFilters.overview === metric.key ? 'active' : ''}">
-          <button class="overview-card-button" type="button" data-overview-card="${metric.key}">
+      const number = (value) => Number(value).toLocaleString('en-IN');
+      const comparisonLabel = overview.comparison.label;
+      document.getElementById('overview-helper').textContent = `${formatOverviewDate(overview.fromDate)} – ${formatOverviewDate(overview.toDate)}${overview.comparison.partial ? ' · Progress so far' : ''}. Comparison: ${formatOverviewDate(overview.comparison.fromDate)} – ${formatOverviewDate(overview.comparison.toDate)}${overview.comparison.partial ? ' (same elapsed time)' : ''}. Click a card to see its tickets.`;
+      const now = new Date();
+      const lastWeek = addDays(startOfWeek(now), -1);
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const presets = [
+        ['overview-current-week', startOfWeek(now), endOfWeek(now)],
+        ['overview-last-week', startOfWeek(lastWeek), endOfWeek(lastWeek)],
+        ['overview-current-month', startOfMonth(now), endOfMonth(now)],
+        ['overview-last-month', startOfMonth(lastMonth), endOfMonth(lastMonth)],
+      ];
+      presets.forEach(([id, start, end]) => document.getElementById(id).setAttribute('aria-pressed', String(sameDateValue(start, overview.fromDate) && sameDateValue(end, overview.toDate))));
+      const cardHtml = (metric, compare) => {
+        const delta = metric.value - metric.previous;
+        const deltaText = delta === 0 ? 'No change' : `${delta > 0 ? '+' : '−'}${number(Math.abs(delta))}`;
+        return `<div class="overview-card ${metric.className} ${activeCardFilters.overview === metric.key ? 'active' : ''}">
+          <button class="overview-card-button" type="button" data-overview-card="${metric.key}" aria-pressed="${activeCardFilters.overview === metric.key}">
             <div class="label">${escapeHtml(metric.label)}</div>
-            <div class="value">${metric.value}</div>
+            <div class="metric-line"><span class="value">${number(metric.value)}</span>${compare ? `<span class="metric-comparison"><strong>${deltaText}</strong><br>${comparisonLabel}</span>` : ''}</div>
             <div class="subvalue">${escapeHtml(metric.detail)}</div>
-            <div class="subvalue">${escapeHtml(metric.action)}</div>
           </button>
-        </div>`).join('');
+        </div>`;
+      };
+      document.getElementById('overview-metrics').innerHTML = overview.metrics.map((metric) => cardHtml(metric, true)).join('');
+      document.getElementById('overview-attention-metrics').innerHTML = overview.attentionMetrics.map((metric) => cardHtml(metric, false)).join('');
       document.querySelectorAll('[data-overview-card]').forEach((button) => {
         button.addEventListener('click', () => {
-          const metricKey = button.getAttribute('data-overview-card') || 'tickets';
+          const metricKey = button.getAttribute('data-overview-card');
           activeCardFilters.overview = activeCardFilters.overview === metricKey ? 'tickets' : metricKey;
           render();
+          document.querySelector(`[data-overview-card="${metricKey}"]`)?.focus({ preventScroll:true });
+          if (activeCardFilters.overview !== 'tickets') document.getElementById('overview-results').scrollIntoView({ behavior:'smooth', block:'start' });
         });
       });
+      document.getElementById('overview-results').classList.toggle('hidden', !overview.selectedMetric);
+      if (overview.selectedMetric) {
+        document.getElementById('overview-results-title').textContent = `${overview.selectedMetric.label} · ${number(overview.selectedRows.length)} tickets`;
+        document.getElementById('overview-results-copy').textContent = ['customer_waiting', 'red_flags'].includes(overview.selectedMetric.key)
+          ? 'Currently open tickets created in the selected dates. Open a ticket to follow up; use Next Agenda to plan your action.'
+          : `${overview.selectedMetric.detail}. Open a ticket to review its progress and plan the next step.`;
+        renderDynamicTable('overview', 'overview-results-head', 'overview-results-body', overview.selectedRows);
+      }
       const openedValues = overview.weekDays.map((item) => item.opened);
       const closedValues = overview.weekDays.map((item) => item.closed);
       const maxLineValue = Math.max(1, ...openedValues, ...closedValues);
@@ -2002,10 +2031,7 @@ def build_dashboard_html(
         const otherWidth = Math.max(0, 100 - bugWidth - featureWidth - taskWidth);
         return `<div class="company-progress-row"><div class="category-progress-label">${escapeHtml(item.label)}</div><div class="company-progress-cell"><div class="stacked-track"><div class="stack-segment bug" style="width:${bugWidth}%"></div><div class="stack-segment feature" style="width:${featureWidth}%"></div><div class="stack-segment task" style="width:${taskWidth}%"></div><div class="stack-segment other" style="width:${otherWidth}%"></div></div><div class="small">Bug ${item.bug} • Feature ${item.feature} • Task ${item.task} • Other ${item.other}</div></div><div class="category-progress-value">${item.total}</div></div>`;
       })].join('') : '<div class="attention-item"><div class="attention-title">No company chart data in this range</div><div class="attention-meta">Top companies are based on tickets created in the selected duration.</div></div>';
-      document.getElementById('overview-attention').innerHTML = overview.attentionRows.map((item) => {
-        const row = item.row;
-        return `<div class="attention-item"><div class="attention-title"><a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">#${row.ticket_id}</a> — ${escapeHtml(row.subject)}</div><div class="attention-meta">Status: ${escapeHtml(row.status_label)} • Owner: ${escapeHtml(displayAgentName(row))} • Last updated: ${escapeHtml(row.updated_at_ist || row.last_activity_at_ist || '-')}</div><div class="attention-reason">${escapeHtml(item.reason)}</div></div>`;
-      }).join('') || '<div class="attention-item"><div class="attention-title">No stuck or delayed tickets in this range</div><div class="attention-meta">Good sign — no immediate follow-up needed from this period view.</div></div>';
+
     }
     function renderCheckboxGroup(containerId, options, allLabel, searchable = false) {
       const container = document.getElementById(containerId);
@@ -2237,6 +2263,7 @@ def build_dashboard_html(
     document.getElementById('sla-date-to').addEventListener('input', render);
     document.getElementById('overview-date-from').addEventListener('input', render);
     document.getElementById('overview-date-to').addEventListener('input', render);
+    document.getElementById('overview-clear-selection').addEventListener('click', () => { activeCardFilters.overview = 'tickets'; render(); });
     document.getElementById('overview-current-week').addEventListener('click', () => {
       const now = new Date();
       document.getElementById('overview-date-from').value = formatDateInputValue(startOfWeek(now));
