@@ -1285,6 +1285,9 @@ def build_dashboard_html(
     table { width:100%; border-collapse:collapse; background:#111827; border-radius:12px; overflow:hidden; min-width:1100px; }
     th, td { border-bottom:1px solid #1e293b; text-align:left; padding:10px 12px; vertical-align:top; font-size:13px; }
     th { position:sticky; top:0; background:#0b1220; z-index:1; }
+    .sort-button { background:transparent; color:inherit; border:0; border-radius:4px; padding:0; font:inherit; font-weight:inherit; text-align:left; white-space:nowrap; }
+    .sort-button:hover { color:#93c5fd; }
+    .sort-button:focus-visible { outline:2px solid #93c5fd; outline-offset:4px; }
     tr.overdue, tr.sla-red { background: rgba(220,38,38,.18); }
     tr.waiting, tr.sla-amber { background: rgba(234,179,8,.12); }
     .pill { display:inline-block; border-radius:999px; padding:2px 8px; font-size:11px; font-weight:700; }
@@ -1516,31 +1519,31 @@ def build_dashboard_html(
     const activeCardFilters = { activity: 'tickets', sla: 'tickets', overview: 'tickets' };
     const columnConfigs = {
       activity: [
-        { id: 'ticket', label: 'ID', default: true, className: 'id', render: (row) => `<a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a>` },
+        { id: 'ticket', sortValue: (row) => row.ticket_id, label: 'ID', default: true, className: 'id', render: (row) => `<a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a>` },
         { id: 'subject', label: 'Subject', default: true, className: 'subject', render: (row) => `<strong>${escapeHtml(row.subject)}</strong><div class="small">Priority: ${escapeHtml(row.priority_label || '-')} • Owner: ${escapeHtml(displayAgentName(row))}</div>` },
         { id: 'status', label: 'Status', default: true, render: (row) => escapeHtml(row.status_label || '') },
         { id: 'type', label: 'Category', default: true, render: (row) => escapeHtml(row.type || '') },
         { id: 'company', label: 'Company', default: true, render: (row) => escapeHtml(row.company_name || 'Unknown') },
         { id: 'hubspot', label: 'HubSpot Deal', default: true, render: (row) => hubspotDealCell(row) },
-        { id: 'updated', label: 'Updated', default: true, render: (row) => `<div>${escapeHtml(row.updated_at_ist || '')}</div><div class="small">${escapeHtml(row.last_action_label || 'Last action')}</div>` },
+        { id: 'updated', sortValue: (row) => parseDate(row.updated_at)?.getTime(), label: 'Updated', default: true, render: (row) => `<div>${escapeHtml(row.updated_at_ist || '')}</div><div class="small">${escapeHtml(row.last_action_label || 'Last action')}</div>` },
         { id: 'reply_check', label: 'Reply Check', default: true, render: (row) => `${replyPill(row)}<div class="small">Customer waiting: ${row.customer_reverted ? 'Yes' : 'No'}</div>` },
         { id: 'customer_reverted', label: 'Customer Reverted', default: false, render: (row) => `${yesNoUnknown(row.customer_reverted_ever, row.conversation_checked)}<div class="small">At least one customer revert</div>` },
         { id: 'replied_same_ticket', label: 'Replied Same Ticket', default: false, render: (row) => `${yesNoUnknown(row.replied_after_customer_revert, row.conversation_checked)}<div class="small">Reply after revert</div>` },
         { id: 'tags', label: 'Tags', default: false, render: (row) => escapeHtml(row.tags_display || '') },
-        { id: 'last_activity', label: 'Latest Activity', default: true, render: (row) => `<div><strong>${escapeHtml(row.last_activity_type || '')}</strong></div><div class="small">${escapeHtml(row.last_activity_at_ist || row.last_activity_at || '')}</div><div>${escapeHtml(row.last_activity_preview || '')}</div>` },
+        { id: 'last_activity', sortValue: (row) => parseDate(row.last_activity_at)?.getTime(), label: 'Latest Activity', default: true, render: (row) => `<div><strong>${escapeHtml(row.last_activity_type || '')}</strong></div><div class="small">${escapeHtml(row.last_activity_at_ist || row.last_activity_at || '')}</div><div>${escapeHtml(row.last_activity_preview || '')}</div>` },
         { id: 'timeline', label: 'Recent Timeline', default: false, className: 'timeline', render: (row) => escapeHtml(row.timeline_excerpt || '') },
         { id: 'next_agenda', label: 'Next Agenda', default: true, render: (row) => `<span class="next-step">${escapeHtml(suggestNextAgenda(row))}</span><div class="small">${escapeHtml(row.sop_action || '')}</div>` },
       ],
       sla: [
-        { id: 'ticket', label: 'ID', default: true, className: 'id', render: (row) => `<a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a>` },
+        { id: 'ticket', sortValue: (row) => row.ticket_id, label: 'ID', default: true, className: 'id', render: (row) => `<a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a>` },
         { id: 'subject', label: 'Subject', default: true, className: 'subject', render: (row) => `<strong>${escapeHtml(row.subject)}</strong><div class="small">Status: ${escapeHtml(row.status_label)} • Type: ${escapeHtml(row.type || '')}</div>` },
         { id: 'sla_category', label: 'Category', default: true, render: (row) => escapeHtml(row.sla_category || '') },
         { id: 'priority', label: 'Priority', default: true, render: (row) => escapeHtml(row.priority_label || '') },
         { id: 'company', label: 'Company', default: true, render: (row) => escapeHtml(row.company_name || 'Unknown') },
         { id: 'hubspot', label: 'HubSpot Deal', default: true, render: (row) => hubspotDealCell(row) },
-        { id: 'created', label: 'Created IST', default: true, render: (row) => escapeHtml(row.created_at_ist || '') },
-        { id: 'closed', label: 'Closed IST', default: true, render: (row) => escapeHtml(row.closed_at_ist || row.resolved_at_ist || '') || '<span class="small">Open</span>' },
-        { id: 'last_activity', label: 'Last Activity', default: true, render: (row) => `<div>${escapeHtml(row.last_activity_at_ist || '')}</div><div class="small">${escapeHtml(row.last_activity_type || '')}</div>` },
+        { id: 'created', sortValue: (row) => parseDate(row.created_at)?.getTime(), label: 'Created IST', default: true, render: (row) => escapeHtml(row.created_at_ist || '') },
+        { id: 'closed', sortValue: (row) => parseDate(row.closed_at || row.resolved_at)?.getTime(), label: 'Closed IST', default: true, render: (row) => escapeHtml(row.closed_at_ist || row.resolved_at_ist || '') || '<span class="small">Open</span>' },
+        { id: 'last_activity', sortValue: (row) => parseDate(row.last_activity_at)?.getTime(), label: 'Last Activity', default: true, render: (row) => `<div>${escapeHtml(row.last_activity_at_ist || '')}</div><div class="small">${escapeHtml(row.last_activity_type || '')}</div>` },
         { id: 'done_by', label: 'Done By', default: true, render: (row) => escapeHtml(displayAgentName(row)) },
         { id: 'ack', label: 'Ack SLA', default: true, render: (row) => `${slaPill(row.ack_state, row.ack_label)}<div class="small">SLA: ${escapeHtml(row.ack_sla || 'NA')}</div>` },
         { id: 'resolution', label: 'Resolution SLA', default: true, render: (row) => `${slaPill(row.resolution_state, row.resolution_label)}<div class="small">SLA: ${escapeHtml(row.resolution_sla || 'NA')}</div>` },
@@ -1549,7 +1552,7 @@ def build_dashboard_html(
         { id: 'next_agenda', label: 'Next Agenda', default: true, render: (row) => `<span class="next-step">${escapeHtml(suggestNextAgenda(row))}</span><div class="small">${escapeHtml(row.sop_action || '')}</div>` },
       ],
       overview: [
-        { id: 'ticket', label: 'ID', default: true, className: 'id', render: (row) => `<a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a>` },
+        { id: 'ticket', sortValue: (row) => row.ticket_id, label: 'ID', default: true, className: 'id', render: (row) => `<a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a>` },
         { id: 'subject', label: 'Ticket Snapshot', default: true, className: 'subject', render: (row) => `<strong>${escapeHtml(row.subject)}</strong><div class="small">${escapeHtml(row._overview_reason || row.last_action_label || 'Quick snapshot')}</div>` },
         { id: 'company', label: 'Company', default: true, render: (row) => escapeHtml(row.company_name || 'Unknown') },
         { id: 'type', label: 'Category', default: true, render: (row) => escapeHtml(row.type || '') },
@@ -1558,11 +1561,12 @@ def build_dashboard_html(
         { id: 'stuck', label: 'Where Stuck', default: true, render: (row) => `<div>${escapeHtml(overviewBottleneckText(row))}</div><div class="small">${escapeHtml(row.last_activity_type || '')}</div>` },
         { id: 'ack', label: 'Ack SLA', default: true, render: (row) => `${slaPill(row.ack_state, row.ack_label)}<div class="small">${escapeHtml(row.ack_sla || 'NA')}</div>` },
         { id: 'resolution', label: 'Resolution SLA', default: true, render: (row) => `${slaPill(row.resolution_state, row.resolution_label)}<div class="small">${escapeHtml(row.resolution_sla || 'NA')}</div>` },
-        { id: 'latest', label: 'Latest Update', default: true, render: (row) => `<div>${escapeHtml(row.last_activity_at_ist || row.updated_at_ist || '')}</div><div class="small">${escapeHtml(row.last_activity_preview || '')}</div>` },
+        { id: 'latest', sortValue: (row) => parseDate(row.last_activity_at || row.updated_at)?.getTime(), label: 'Latest Update', default: true, render: (row) => `<div>${escapeHtml(row.last_activity_at_ist || row.updated_at_ist || '')}</div><div class="small">${escapeHtml(row.last_activity_preview || '')}</div>` },
         { id: 'next_agenda', label: 'Next Agenda', default: true, render: (row) => `<span class="next-step">${escapeHtml(row._next_agenda || suggestNextAgenda(row))}</span><div class="small">${escapeHtml(row.sop_action || '')}</div>` },
         { id: 'hubspot', label: 'HubSpot Deal', default: false, render: (row) => hubspotDealCell(row) },
       ],
     };
+    const sortState = { activity: null, sla: null, overview: null };
     const columnPickerIds = { activity: 'activity-columns', sla: 'sla-columns', overview: 'overview-columns' };
     const defaultColumnState = Object.fromEntries(Object.entries(columnConfigs).map(([view, columns]) => [view, columns.filter((column) => column.default !== false).map((column) => column.id)]));
     const storedColumnState = (() => {
@@ -1661,17 +1665,51 @@ def build_dashboard_html(
       }
       return row.sla_red_flag ? 'sla-red' : row.sla_amber_flag ? 'sla-amber' : '';
     }
+    function sortedTableRows(view, sourceRows) {
+      const activeSort = sortState[view];
+      const column = (columnConfigs[view] || []).find((item) => item.id === activeSort?.columnId);
+      if (!column?.sortValue || !getVisibleColumns(view).some((item) => item.id === column.id)) return sourceRows;
+      const numericValue = (row) => {
+        const value = column.sortValue(row);
+        if (value === null || value === undefined || String(value).trim() === '') return null;
+        const number = Number(value);
+        return Number.isFinite(number) ? number : null;
+      };
+      return [...sourceRows].sort((left, right) => {
+        const a = numericValue(left);
+        const b = numericValue(right);
+        // Missing dates and numbers stay last in either direction.
+        if (a === null) return b === null ? 0 : 1;
+        if (b === null) return -1;
+        return activeSort.direction === 'ascending' ? a - b : b - a;
+      });
+    }
     function renderDynamicTable(view, headId, bodyId, sourceRows) {
       const head = document.getElementById(headId);
       const body = document.getElementById(bodyId);
       if (!head || !body) return;
       const columns = getVisibleColumns(view);
-      head.innerHTML = `<tr>${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr>`;
+      const activeSort = sortState[view];
+      head.innerHTML = `<tr>${columns.map((column) => {
+        if (!column.sortValue) return `<th scope="col">${escapeHtml(column.label)}</th>`;
+        const direction = activeSort?.columnId === column.id ? activeSort.direction : null;
+        const nextDirection = direction === 'ascending' ? 'descending' : 'ascending';
+        return `<th scope="col" aria-sort="${direction || 'none'}"><button type="button" class="sort-button" data-sort-column="${column.id}" title="Sort ${escapeHtml(column.label)} ${nextDirection}">${escapeHtml(column.label)} <span aria-hidden="true">${direction === 'ascending' ? '↑' : direction === 'descending' ? '↓' : '↕'}</span></button></th>`;
+      }).join('')}</tr>`;
+      head.querySelectorAll('[data-sort-column]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const columnId = button.dataset.sortColumn;
+          sortState[view] = { columnId, direction: activeSort?.columnId === columnId && activeSort.direction === 'ascending' ? 'descending' : 'ascending' };
+          render();
+          head.querySelector(`[data-sort-column="${columnId}"]`)?.focus();
+        });
+      });
+      const displayedRows = sortedTableRows(view, sourceRows);
       if (!sourceRows.length) {
         body.innerHTML = `<tr><td class="table-empty" colspan="${Math.max(1, columns.length)}">No tickets match the current filters.</td></tr>`;
         return;
       }
-      body.innerHTML = sourceRows.map((row) => `<tr class="${rowClassForView(view, row)}">${columns.map((column) => `<td class="${escapeHtml(column.className || '')}">${column.render(row)}</td>`).join('')}</tr>`).join('');
+      body.innerHTML = displayedRows.map((row) => `<tr class="${rowClassForView(view, row)}">${columns.map((column) => `<td class="${escapeHtml(column.className || '')}">${column.render(row)}</td>`).join('')}</tr>`).join('');
     }
     function isRejectedStatus(label) {
       return String(label || '').toLowerCase().includes('reject');
