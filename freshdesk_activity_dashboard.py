@@ -771,6 +771,69 @@ def build_hubspot_deal_url(ui_domain: str, portal_id: str, deal_id: str) -> str:
     return f"https://{domain}/contacts/{portal}/record/0-3/{identifier}"
 
 
+def fetch_hubspot_deal_stages(
+    deal_urls_by_ticket: Dict[int, str],
+    hubspot_client: Optional[freshdesk_hubspot_sync.HubSpotClient],
+    fetch_errors: List[str],
+) -> Dict[int, Dict[str, str]]:
+    """Read the current stage of each ticket's displayed primary deal once per build."""
+    deal_ids_by_ticket: Dict[int, str] = {}
+    for ticket_id, url in deal_urls_by_ticket.items():
+        path = urllib.parse.urlparse(url).path
+        match = re.search(r"/(?:record/0-3|deal)/(\d+)(?:/|$)", path)
+        if match:
+            deal_ids_by_ticket[ticket_id] = match.group(1)
+    if hubspot_client is None or not deal_ids_by_ticket:
+        return {}
+
+    stage_labels: Dict[Tuple[str, str], str] = {}
+    try:
+        code, data, _ = hubspot_client.request("GET", "/crm/v3/pipelines/deals")
+        if code == 200 and isinstance(data, dict):
+            for pipeline in data.get("results") or []:
+                pipeline_id = str(pipeline.get("id") or "")
+                pipeline_label = str(pipeline.get("label") or pipeline_id)
+                for stage in pipeline.get("stages") or []:
+                    stage_id = str(stage.get("id") or "")
+                    label = str(stage.get("label") or stage_id)
+                    stage_labels[(pipeline_id, stage_id)] = f"{pipeline_label} · {label}"
+        else:
+            fetch_errors.append(f"hubspot deal stage labels: HTTP {code}")
+    except (OSError, ValueError, freshdesk_hubspot_sync.HttpError) as exc:
+        fetch_errors.append(f"hubspot deal stage labels: {exc}")
+
+    stages_by_deal: Dict[str, Dict[str, str]] = {}
+    deal_ids = sorted(set(deal_ids_by_ticket.values()))
+    for offset in range(0, len(deal_ids), 100):
+        batch = deal_ids[offset:offset + 100]
+        try:
+            code, data, _ = hubspot_client.request(
+                "POST", "/crm/v3/objects/deals/batch/read",
+                {"properties": ["dealstage", "pipeline"], "inputs": [{"id": deal_id} for deal_id in batch]},
+            )
+            if code not in (200, 207) or not isinstance(data, dict):
+                fetch_errors.append(f"hubspot deal stages batch {offset // 100 + 1}: HTTP {code}")
+                continue
+            for deal in data.get("results") or []:
+                properties = deal.get("properties") or {}
+                stage_id = str(properties.get("dealstage") or "").strip()
+                pipeline_id = str(properties.get("pipeline") or "").strip()
+                if stage_id:
+                    stages_by_deal[str(deal.get("id"))] = {
+                        "hubspot_deal_stage": f"{pipeline_id}:{stage_id}",
+                        "hubspot_deal_stage_label": stage_labels.get((pipeline_id, stage_id), f"Stage {stage_id}"),
+                    }
+            if data.get("errors"):
+                fetch_errors.append(f"hubspot deal stages batch {offset // 100 + 1}: some deals could not be read")
+        except (OSError, ValueError, freshdesk_hubspot_sync.HttpError) as exc:
+            fetch_errors.append(f"hubspot deal stages batch {offset // 100 + 1}: {exc}")
+    return {
+        ticket_id: stages_by_deal[deal_id]
+        for ticket_id, deal_id in deal_ids_by_ticket.items()
+        if deal_id in stages_by_deal
+    }
+
+
 def get_ticket_custom_field_text(ticket: Dict[str, object], field_name: str) -> str:
     custom_fields = ticket.get("custom_fields") if isinstance(ticket.get("custom_fields"), dict) else {}
     return str((custom_fields or {}).get(field_name) or "").strip()
@@ -1053,6 +1116,8 @@ def build_row(
         "company_name": str(ticket.get("_company_name") or "").strip() or "Unknown",
         "hubspot_deal_url": str(ticket.get("_hubspot_deal_url") or "").strip(),
         "hubspot_deal_count": as_int(ticket.get("_hubspot_deal_count")) or 0,
+        "hubspot_deal_stage": str(ticket.get("_hubspot_deal_stage") or ""),
+        "hubspot_deal_stage_label": str(ticket.get("_hubspot_deal_stage_label") or ""),
         "source": as_int(ticket.get("source")) or 0,
         "created_at": str(ticket.get("created_at") or ""),
         "created_at_ist": format_datetime_ist(ticket.get("created_at")),
@@ -1194,6 +1259,8 @@ def write_csv(path: Path, rows: Sequence[Dict[str, object]]) -> None:
         "freshdesk_company_name",
         "hubspot_deal_url",
         "hubspot_deal_count",
+        "hubspot_deal_stage",
+        "hubspot_deal_stage_label",
         "created_at",
         "updated_at",
         "last_activity_at",
@@ -1305,6 +1372,10 @@ def build_dashboard_html(
     .section-copy { color:#94a3b8; font-size:12px; margin-top:4px; max-width:780px; }
     .column-box { min-width:220px; }
     .table-empty { text-align:center; color:#94a3b8; padding:20px; }
+    .deal-stage-control { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:14px 0; }
+    .deal-stage-control label { font-size:14px; color:#cbd5e1; }
+    .deal-stage-control select { background:#0b1220; color:#e2e8f0; border:1px solid #475569; border-radius:10px; padding:10px 12px; max-width:100%; }
+    .deal-stage-control select:focus-visible { outline:2px solid #93c5fd; outline-offset:2px; }
     .overview-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:16px; margin-top:16px; }
     .overview-card, .chart-card { background:#111827; border:1px solid #334155; border-radius:12px; padding:16px; min-width:0; overflow:hidden; }
     .overview-card .label, .chart-card .label, .attention-item .label { color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
@@ -1419,6 +1490,11 @@ def build_dashboard_html(
       <button class="tab-btn active" id="tab-overview">Ticket Progress</button>
       <button class="tab-btn" id="tab-sla">Ticket Pipeline</button>
       <button class="tab-btn" id="tab-activity">Email Alert</button>
+    </div>
+    <div class="deal-stage-control">
+      <label for="deal-stage-filter">Deal stage</label>
+      <select id="deal-stage-filter" aria-describedby="deal-stage-helper"><option value="all">All deal stages</option></select>
+      <span class="small" id="deal-stage-helper">Applies to all tabs · Stage of the linked primary deal at the latest refresh</span>
     </div>
     <div class="cards" id="cards"></div>
     <div id="activity-view">
@@ -1908,7 +1984,7 @@ def build_dashboard_html(
       const { fromDate, toDate } = getOverviewDateRange();
       const weekDays = buildDailyBuckets(fromDate, toDate);
       const selectedTypes = selectedValues('overview-filter-type');
-      const filteredRows = rows.filter((row) => matchesMulti(row.type, selectedTypes));
+      const filteredRows = rows.filter((row) => matchesMulti(row.type, selectedTypes) && matchesDealStage(row));
       const comparison = overviewComparisonRange(fromDate, toDate);
       const rangeStats = computeRangeStats(filteredRows, fromDate, comparison.effectiveEnd);
       const previousStats = computeRangeStats(filteredRows, comparison.fromDate, comparison.toDate);
@@ -2054,10 +2130,25 @@ def build_dashboard_html(
       const label = row.reply_highlight === 'overdue' ? `Overdue${row.reply_age_hours ? ` (${row.reply_age_hours}h)` : ''}` : row.reply_highlight === 'waiting' ? `Waiting${row.reply_age_hours ? ` (${row.reply_age_hours}h)` : ''}` : 'OK';
       return `<span class="pill ${row.reply_highlight}">${label}</span>`;
     }
+    function dealStageKey(row) {
+      return row.hubspot_deal_stage || (row.hubspot_deal_url ? 'stage_unavailable' : 'no_linked_deal');
+    }
+    function dealStageLabel(row) {
+      return row.hubspot_deal_stage_label || (row.hubspot_deal_url ? 'Stage unavailable' : 'No linked deal');
+    }
+    function matchesDealStage(row) {
+      const selected = document.getElementById('deal-stage-filter').value;
+      return !selected || selected === 'all' || dealStageKey(row) === selected;
+    }
+    function renderDealStageFilter() {
+      const stages = new Map(rows.map((row) => [dealStageKey(row), dealStageLabel(row)]));
+      const options = [...stages.entries()].sort((left, right) => left[1].localeCompare(right[1]));
+      document.getElementById('deal-stage-filter').innerHTML = '<option value="all">All deal stages</option>' + options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join('');
+    }
     function hubspotDealCell(row) {
       if (!row.hubspot_deal_url) return '<span class="small">—</span>';
       const suffix = row.hubspot_deal_count > 1 ? ` (+${row.hubspot_deal_count - 1})` : '';
-      return `<a href="${escapeHtml(row.hubspot_deal_url)}" target="_blank" rel="noreferrer">Open Deal</a><div class="small">HubSpot${suffix}</div>`;
+      return `<a href="${escapeHtml(row.hubspot_deal_url)}" target="_blank" rel="noreferrer">Open Deal</a><div class="small">${escapeHtml(dealStageLabel(row))}${suffix}</div>`;
     }
     function yesNoUnknown(value, checked) {
       if (!checked) return '<span class="small">Not checked</span>';
@@ -2123,6 +2214,7 @@ def build_dashboard_html(
       const fromDate = document.getElementById(view === 'activity' ? 'activity-date-from' : 'sla-date-from').value;
       const toDate = document.getElementById(view === 'activity' ? 'activity-date-to' : 'sla-date-to').value;
       return rows.filter((row) => {
+        if (!matchesDealStage(row)) return false;
         const haystack = [row.ticket_id, row.subject, row.tags_display, row.timeline_excerpt, row.sla_category, row.sop_action, row.last_activity_user_name, row.created_at_ist, row.closed_at_ist, row.last_activity_at_ist, row.company_name].join(' ').toLowerCase();
         if (query && !haystack.includes(query)) return false;
         if (!matchesMulti(row.status_label, statuses)) return false;
@@ -2239,6 +2331,8 @@ def build_dashboard_html(
       document.getElementById('tab-overview').classList.toggle('active', view === 'overview');
       render();
     }
+    renderDealStageFilter();
+    document.getElementById('deal-stage-filter').addEventListener('change', render);
     document.getElementById('meta').textContent = `Updated since ${summary.updated_since} • Generated at ${summary.generated_at} • Total tickets ${summary.total_tickets}`;
     document.getElementById('notice').textContent = __NOTICE__;
     renderCheckboxGroup('activity-filter-highlight', ['overdue', 'waiting', 'customer_reverted'], 'All reply states');
@@ -2584,6 +2678,10 @@ def main() -> int:
         fetch_errors=fetch_errors,
     )
 
+    hubspot_deal_stages_by_ticket = fetch_hubspot_deal_stages(
+        hubspot_deal_urls_by_ticket, hubspot_client, fetch_errors
+    )
+
     rows: List[Dict[str, object]] = []
     tag_sync = {"updated": 0, "unchanged": 0, "failed": 0}
     conversation_fetches = 0
@@ -2654,6 +2752,8 @@ def main() -> int:
         ticket_payload["_company_name"] = hubspot_company_names_by_ticket.get(ticket_id, "") or freshdesk_company_name
         ticket_payload["_hubspot_deal_url"] = hubspot_deal_urls_by_ticket.get(ticket_id, "")
         ticket_payload["_hubspot_deal_count"] = hubspot_deal_counts_by_ticket.get(ticket_id, 0)
+        for key, value in hubspot_deal_stages_by_ticket.get(ticket_id, {}).items():
+            ticket_payload[f"_{key}"] = value
         try:
             conversations = []
             metrics_override = None if no_conversations else resolved_metrics.get(ticket_id)

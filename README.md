@@ -342,6 +342,12 @@ Useful routes:
 - `/download.csv` CSV export
 - `/refresh` refresh trigger used by the dashboard button
 
+### Deal stage filter
+
+The **Deal stage** dropdown applies across Ticket Progress, Ticket Pipeline, and Email Alert. Cards, comparisons, charts, and ticket lists follow the selected stage together with the date, category, and other filters.
+
+Stages come from the ticket's primary **Open Deal** link in HubSpot and refresh whenever the dashboard data is rebuilt. Pipeline names distinguish stages with the same name. Historical periods are grouped by the deal's current stage at the latest refresh. Choose **All deal stages** to reset, **No linked deal** for tickets without a deal, or **Stage unavailable** when a linked deal's stage could not be fetched.
+
 ### GitHub Pages version
 
 This repo can also publish the dashboard as a static GitHub Pages site.
