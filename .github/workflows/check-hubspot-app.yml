@@ -24,7 +24,7 @@ jobs:
           request = urllib.request.Request(
               "https://api.hubapi.com/oauth/v2/private-apps/get/access-token-info",
               data=json.dumps({"tokenKey": token}).encode(),
-              headers={"Content-Type": "application/json"},
+              headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
               method="POST",
           )
           with urllib.request.urlopen(request, timeout=30) as response:
