@@ -2,6 +2,11 @@ name: Identify dashboard HubSpot app
 
 on:
   workflow_dispatch:
+    inputs:
+      company_id:
+        description: Optional ticket company ID to verify against HubSpot
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -11,9 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: github-pages
     steps:
+      - uses: actions/checkout@v4
       - name: Report HubSpot app identity and company-read permission
         env:
           HUBSPOT_ACCESS_TOKEN: ${{ secrets.HUBSPOT_ACCESS_TOKEN }}
+          CHECK_COMPANY_ID: ${{ inputs.company_id }}
         shell: python
         run: |
           import json
@@ -34,6 +41,20 @@ jobs:
               "hub_id": info.get("hubId"),
               "company_read_enabled": "crm.objects.companies.read" in info.get("scopes", []),
           }
+          external_id = os.environ.get("CHECK_COMPANY_ID", "").strip()
+          if external_id:
+              import freshdesk_activity_dashboard as dashboard
+              import freshdesk_hubspot_sync
+
+              errors = []
+              client = freshdesk_hubspot_sync.HubSpotClient(token)
+              contexts = dashboard.resolve_hubspot_companies_by_external_id(
+                  [{"custom_fields": {"cf_company_id880506": external_id}}], client, errors
+              )
+              context = contexts.get(external_id.lower(), {})
+              report["company_name"] = context.get("name")
+              report["matching_deals"] = len(context.get("deal_ids", []))
+              report["lookup_error_count"] = len(errors)
           print(json.dumps(report))
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write("## Dashboard HubSpot app\n\n")
