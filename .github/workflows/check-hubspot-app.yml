@@ -1,0 +1,41 @@
+name: Identify dashboard HubSpot app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  identify:
+    runs-on: ubuntu-latest
+    environment: github-pages
+    steps:
+      - name: Report HubSpot app identity and company-read permission
+        env:
+          HUBSPOT_ACCESS_TOKEN: ${{ secrets.HUBSPOT_ACCESS_TOKEN }}
+        shell: python
+        run: |
+          import json
+          import os
+          import urllib.request
+
+          token = os.environ["HUBSPOT_ACCESS_TOKEN"]
+          request = urllib.request.Request(
+              "https://api.hubapi.com/oauth/v2/private-apps/get/access-token-info",
+              data=json.dumps({"tokenKey": token}).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              info = json.load(response)
+          report = {
+              "app_id": info.get("appId"),
+              "hub_id": info.get("hubId"),
+              "company_read_enabled": "crm.objects.companies.read" in info.get("scopes", []),
+          }
+          print(json.dumps(report))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("## Dashboard HubSpot app\n\n")
+              for key, value in report.items():
+                  summary.write(f"- {key}: {value}\n")
