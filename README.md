@@ -348,7 +348,7 @@ The dashboard uses the company assigned to the Freshdesk ticket, then the reques
 
 ### Company and ticket-type breakdowns
 
-Ticket Progress includes **Who is raising tickets, and what are they about?** This shows a plain-language summary, companies ranked by new-ticket count with separate columns for each ticket type, and a ticket-type table with counts, shares, and previous-period changes. Tickets without an identified company are listed separately and remain included in type totals. Click any nonzero count to open its exact ticket list. Expand **Daily new tickets and closures** for date-by-date counts; future dates are omitted. All breakdowns follow the selected dates, category, and deal stage. Old open tickets are kept in the progress cards rather than mixed into the new-ticket ranking.
+Ticket Progress includes **Who is raising tickets, and what are they about?** This shows a plain-language summary, the top 10 companies ranked by new-ticket count with separate columns for each ticket type, and a ticket-type table with counts, shares, and previous-period changes. Tickets without an identified company are listed separately and remain included in type totals. Click any nonzero count to open its exact ticket list. Expand **Daily new tickets and closures** for date-by-date counts; future dates are omitted. All breakdowns follow the selected dates, category, and deal stage. Old open tickets are kept in the progress cards rather than mixed into the new-ticket ranking.
 
 ### Deal stage filter
 

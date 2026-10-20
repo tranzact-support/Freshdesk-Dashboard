@@ -1729,8 +1729,8 @@ def build_dashboard_html(
         <summary>Who is raising tickets, and what are they about?</summary>
         <div class="breakdown-summary" id="overview-breakdown-summary"></div>
         <div class="chart-card breakdown-panel">
-          <h3>Which companies raised the most tickets?</h3>
-          <p class="section-copy">Ranked by new tickets in the selected dates. Each type has its own count. Click a count to see the tickets.</p>
+          <h3>Top 10 companies raising tickets</h3>
+          <p class="section-copy">Top 10 by new tickets in the selected dates. Each type has its own count. Click a count to see the tickets.</p>
           <div id="overview-company-bars"></div>
         </div>
         <div class="chart-card breakdown-panel">
@@ -2271,7 +2271,7 @@ def build_dashboard_html(
       document.getElementById('overview-breakdown-summary').textContent = breakdown.total
         ? `${number(breakdown.total)} new tickets. ${companySummary} ${typeSummary} ${trendSummary}`
         : 'No new tickets in the selected dates and filters. Try a wider date range or another deal stage.';
-      const companyRows = breakdown.companies.map((company, index) => `<tr><th scope="row" class="company-label">${index + 1}. ${escapeHtml(company.label)}</th><td>${countButton(company.total, 'company', company.label, company.label + ' · New tickets')}</td>${breakdown.types.filter((type) => type.count > 0).map((type) => `<td>${countButton(company.byType.get(type.label) || 0, 'company_type', company.label, company.label + ' · ' + type.label, type.label)}</td>`).join('')}</tr>`).join('');
+      const companyRows = overview.topCompanies.map((company, index) => `<tr><th scope="row" class="company-label">${index + 1}. ${escapeHtml(company.label)}</th><td>${countButton(company.total, 'company', company.label, company.label + ' · New tickets')}</td>${breakdown.types.filter((type) => type.count > 0).map((type) => `<td>${countButton(company.byType.get(type.label) || 0, 'company_type', company.label, company.label + ' · ' + type.label, type.label)}</td>`).join('')}</tr>`).join('');
       const unknownNote = breakdown.unknownRows.length ? `<p class="breakdown-note">${countButton(breakdown.unknownRows.length, 'unknown_company', '', 'Company not identified · New tickets')} new tickets have no identified company. These are excluded from the company ranking and included in ticket-type totals.</p>` : '';
       document.getElementById('overview-company-bars').innerHTML = (companyRows
         ? table(['Company', 'New tickets', ...breakdown.types.filter((type) => type.count > 0).map((type) => type.label)], companyRows)
