@@ -43,6 +43,8 @@ jobs:
           }
           external_id = os.environ.get("CHECK_COMPANY_ID", "").strip()
           if external_id:
+              import sys
+              sys.path.insert(0, os.environ["GITHUB_WORKSPACE"])
               import freshdesk_activity_dashboard as dashboard
               import freshdesk_hubspot_sync
 
