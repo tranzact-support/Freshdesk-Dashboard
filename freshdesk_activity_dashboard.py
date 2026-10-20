@@ -1532,11 +1532,35 @@ def build_dashboard_html(
     .breakdown-panel { margin-top:16px; }
     .breakdown-panel h3 { margin:0 0 8px; font-size:17px; }
     .breakdown-panel > summary { cursor:pointer; font-size:16px; }
-    .breakdown-summary { color:#e2e8f0; background:#172033; border-left:3px solid #60a5fa; border-radius:8px; padding:14px 16px; line-height:1.7; }
-    .breakdown-table { min-width:620px; }
-    .breakdown-table th { position:static; color:#cbd5e1; font-weight:500; }
-    .breakdown-table th:not(:first-child), .breakdown-table td:not(:first-child) { text-align:right; }
-    .breakdown-table .company-label { min-width:210px; max-width:350px; overflow-wrap:anywhere; }
+    .ticket-chart { display:grid; gap:16px; margin-top:14px; }
+    .chart-axis { display:grid; grid-template-columns:minmax(180px, 240px) minmax(0, 1fr) 60px; gap:14px; color:#94a3b8; font-size:12px; }
+    .chart-ticks { display:flex; justify-content:space-between; }
+    .chart-row { display:grid; grid-template-columns:minmax(180px, 240px) minmax(0, 1fr) 60px; gap:14px; align-items:center; padding-bottom:12px; border-bottom:1px solid #1e293b; }
+    .chart-row-name { font-size:13px; font-weight:600; overflow-wrap:anywhere; }
+    .chart-row-value { text-align:right; font-size:18px; font-weight:700; }
+    .chart-row-track { min-width:0; }
+    .ticket-bar-track { height:26px; background:repeating-linear-gradient(to right, #334155 0, #334155 1px, transparent 1px, transparent 50%); border-bottom:1px solid #334155; display:flex; align-items:center; }
+    .ticket-bar-stack { height:20px; display:flex; border-radius:4px; overflow:hidden; }
+    .ticket-bar-segment { display:block; height:100%; border:0; border-radius:0; padding:0; min-width:0; cursor:pointer; }
+    .ticket-bar-segment:hover { filter:brightness(1.3); }
+    .ticket-bar-segment:focus-visible { outline:2px solid white; outline-offset:-2px; }
+    .chart-type-counts { display:flex; gap:10px; flex-wrap:wrap; margin-top:6px; }
+    .chart-type-counts .breakdown-count { font-size:12px; padding:2px 0; font-weight:400; text-decoration:none; }
+    .chart-type-dot { width:9px; height:9px; border-radius:2px; display:inline-block; margin-right:5px; }
+    .chart-legend { display:flex; gap:14px; flex-wrap:wrap; color:#cbd5e1; font-size:12px; margin:12px 0; }
+    .paired-bar { display:grid; grid-template-columns:54px minmax(0, 1fr) 42px; gap:8px; align-items:center; font-size:12px; color:#94a3b8; }
+    .paired-bar .ticket-bar-track { height:24px; }
+    .paired-bar .ticket-bar-stack { height:15px; }
+    .paired-bar .breakdown-count { font-size:13px; padding:2px; }
+    .paired-chart-axis { grid-template-columns:minmax(180px, 240px) minmax(0, 1fr) 60px; }
+    .paired-chart-axis .chart-ticks { padding-left:62px; padding-right:50px; }
+    .chart-share { color:#94a3b8; font-size:12px; }
+    @media (max-width: 700px) {
+      .chart-row, .chart-axis { grid-template-columns:minmax(100px, 140px) minmax(0, 1fr) 40px; gap:8px; }
+      .paired-bar { grid-template-columns:44px minmax(0, 1fr) 28px; gap:4px; }
+      .paired-chart-axis .chart-ticks { padding-left:48px; padding-right:32px; }
+      .chart-row-value { font-size:15px; }
+    }
     .breakdown-count { color:#93c5fd; background:transparent; border:0; border-radius:4px; padding:4px 6px; font:inherit; font-weight:600; text-decoration:underline; text-underline-offset:3px; }
     .breakdown-count:hover { background:#1e3a5f; }
     .breakdown-count:focus-visible { outline:2px solid #93c5fd; }
@@ -1726,21 +1750,20 @@ def build_dashboard_html(
         </table></div>
       </div>
       <details class="overview-section overview-details" open>
-        <summary>Who is raising tickets, and what are they about?</summary>
-        <div class="breakdown-summary" id="overview-breakdown-summary"></div>
+        <summary>Ticket charts</summary>
         <div class="chart-card breakdown-panel">
           <h3>Top 10 companies raising tickets</h3>
-          <p class="section-copy">Top 10 by new tickets in the selected dates. Each type has its own count. Click a count to see the tickets.</p>
+          <p class="section-copy">New tickets · Bar length = ticket count · Click a bar or number</p>
           <div id="overview-company-bars"></div>
         </div>
         <div class="chart-card breakdown-panel">
-          <h3>What types of tickets are being raised?</h3>
-          <p class="section-copy">New tickets only. Compare with the previous period using the same dates as the progress cards above.</p>
+          <h3>New tickets by type</h3>
+          <p class="section-copy">Current period vs previous period · Same scale for every type</p>
           <div id="overview-category-bars"></div>
         </div>
         <details class="chart-card breakdown-panel">
           <summary>Daily new tickets and closures</summary>
-          <p class="section-copy">Closures can include tickets raised before the selected dates. Future dates are left out.</p>
+          <p class="section-copy">New tickets and closed tickets · Closures may include older tickets</p>
           <div id="overview-daily-activity"></div>
         </details>
       </details>
@@ -2255,38 +2278,32 @@ def build_dashboard_html(
       const number = (value) => Number(value).toLocaleString('en-IN');
       const countButton = (count, kind, value, label, type = '') => count
         ? `<button type="button" class="breakdown-count" data-breakdown-kind="${kind}" data-breakdown-value="${escapeHtml(value)}" data-breakdown-type="${escapeHtml(type)}" data-breakdown-label="${escapeHtml(label)}" aria-label="${escapeHtml(label)}: ${number(count)} tickets">${number(count)}</button>` : '0';
-      const table = (headers, body) => `<div class="table-wrap"><table class="breakdown-table"><thead><tr>${headers.map((label) => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
-      const leadCompanies = breakdown.companies.filter((company) => company.total === breakdown.companies[0]?.total);
-      const leadTypes = breakdown.types.filter((type) => type.count === breakdown.types[0]?.count);
-      const companySummary = !leadCompanies.length ? 'No named companies in these results.'
-        : leadCompanies.length === 1 ? `${leadCompanies[0].label} raised the most: ${number(leadCompanies[0].total)} new tickets.`
-        : `${leadCompanies.length} companies are tied for the most new tickets (${number(leadCompanies[0].total)} each).`;
-      const typeSummary = !leadTypes.length ? '' : leadTypes.length === 1
-        ? `Most common type: ${leadTypes[0].label} (${number(leadTypes[0].count)} of ${number(breakdown.total)}).`
-        : `${leadTypes.length} ticket types are tied for the most (${number(leadTypes[0].count)} each).`;
-      const newCount = overview.metrics.find((metric) => metric.key === 'created_in_range');
-      const delta = newCount.value - newCount.previous;
-      const trendSummary = !delta ? `New tickets are unchanged ${overview.comparison.label}.`
-        : `${number(Math.abs(delta))} ${delta > 0 ? 'more' : 'fewer'} new tickets ${overview.comparison.label}.`;
-      document.getElementById('overview-breakdown-summary').textContent = breakdown.total
-        ? `${number(breakdown.total)} new tickets. ${companySummary} ${typeSummary} ${trendSummary}`
-        : 'No new tickets in the selected dates and filters. Try a wider date range or another deal stage.';
-      const companyRows = overview.topCompanies.map((company, index) => `<tr><th scope="row" class="company-label">${index + 1}. ${escapeHtml(company.label)}</th><td>${countButton(company.total, 'company', company.label, company.label + ' · New tickets')}</td>${breakdown.types.filter((type) => type.count > 0).map((type) => `<td>${countButton(company.byType.get(type.label) || 0, 'company_type', company.label, company.label + ' · ' + type.label, type.label)}</td>`).join('')}</tr>`).join('');
-      const unknownNote = breakdown.unknownRows.length ? `<p class="breakdown-note">${countButton(breakdown.unknownRows.length, 'unknown_company', '', 'Company not identified · New tickets')} new tickets have no identified company. These are excluded from the company ranking and included in ticket-type totals.</p>` : '';
-      document.getElementById('overview-company-bars').innerHTML = (companyRows
-        ? table(['Company', 'New tickets', ...breakdown.types.filter((type) => type.count > 0).map((type) => type.label)], companyRows)
-        : '<p class="breakdown-note">No companies to rank for the selected dates and filters.</p>') + unknownNote;
-      const typeRows = breakdown.types.map((type) => {
-        const change = type.count - type.previous;
-        return `<tr><th scope="row">${escapeHtml(type.label)}</th><td>${countButton(type.count, 'type', type.label, type.label + ' · New tickets')}</td><td>${type.share}%</td><td>${number(type.previous)}</td><td>${change === 0 ? 'No change' : number(Math.abs(change)) + (change > 0 ? ' more' : ' fewer')}</td></tr>`;
+      const colors = ['#38bdf8', '#fbbf24', '#fb7185', '#a78bfa', '#34d399', '#f472b6'];
+      const colorForType = (label) => ({'Bug':'#fb7185','Feature Idea':'#a78bfa','Task - Backend':'#38bdf8','Task - Experience Team':'#fbbf24','Unspecified':'#94a3b8'}[label] || colors[[...label].reduce((value, char) => value + char.charCodeAt(0), 0) % colors.length]);
+      const attrs = (kind, value, label, type = '') => `data-breakdown-kind="${kind}" data-breakdown-value="${escapeHtml(value)}" data-breakdown-type="${escapeHtml(type)}" data-breakdown-label="${escapeHtml(label)}"`;
+      const segment = (count, total, color, kind, value, label, type = '') => count
+        ? `<button type="button" class="ticket-bar-segment" style="width:${count / total * 100}%;background:${color}" ${attrs(kind, value, label, type)} title="${escapeHtml(label)}: ${number(count)}" aria-label="${escapeHtml(label)}: ${number(count)} tickets"></button>` : '';
+      const axis = (label, max, paired = false) => `<div class="chart-axis ${paired ? 'paired-chart-axis' : ''}"><span>${escapeHtml(label)}</span><div class="chart-ticks"><span>0</span><span>${number(max / 2)}</span><span>${number(max)}</span></div><span style="text-align:right">Tickets</span></div>`;
+      const positiveTypes = breakdown.types.filter((type) => type.count > 0);
+      const chartMax = (values) => Math.max(2, Math.ceil(Math.max(0, ...values) / 2) * 2);
+      const companyMax = chartMax(overview.topCompanies.map((company) => company.total));
+      const companyRows = overview.topCompanies.map((company, index) => {
+        const label = company.label + ' · New tickets';
+        const segments = positiveTypes.map((type) => segment(company.byType.get(type.label) || 0, company.total, colorForType(type.label), 'company_type', company.label, company.label + ' · ' + type.label, type.label)).join('');
+        const typeCounts = positiveTypes.filter((type) => company.byType.get(type.label)).map((type) => `<span><span class="chart-type-dot" style="background:${colorForType(type.label)}"></span><button type="button" class="breakdown-count" ${attrs('company_type', company.label, company.label + ' · ' + type.label, type.label)}>${escapeHtml(type.label)} ${number(company.byType.get(type.label))}</button></span>`).join('');
+        return `<div class="chart-row"><div class="chart-row-name">${index + 1}. ${escapeHtml(company.label)}</div><div class="chart-row-track"><div class="ticket-bar-track"><div class="ticket-bar-stack" style="width:${company.total / companyMax * 100}%">${segments}</div></div><div class="chart-type-counts">${typeCounts}</div></div><div class="chart-row-value">${countButton(company.total, 'company', company.label, label)}</div></div>`;
       }).join('');
-      document.getElementById('overview-category-bars').innerHTML = typeRows
-        ? table(['Ticket type', 'New tickets', 'Share of new tickets', 'Previous period', 'Change'], typeRows)
-        : '<p class="breakdown-note">No new tickets to break down.</p>';
-      const dailyRows = overview.weekDays.filter((day) => day.key <= formatDateInputValue(overview.comparison.effectiveEnd)).map((day) => `<tr><th scope="row">${escapeHtml(day.label)} ${escapeHtml(day.fullLabel)}</th><td>${countButton(day.opened, 'day_new', day.key, day.fullLabel + ' · New tickets')}</td><td>${countButton(day.closed, 'day_closed', day.key, day.fullLabel + ' · Closed tickets')}</td></tr>`).join('');
-      document.getElementById('overview-daily-activity').innerHTML = dailyRows
-        ? table(['Date', 'New tickets', 'Closed tickets'], dailyRows)
-        : '<p class="breakdown-note">No elapsed dates in this range yet.</p>';
+      const legend = `<div class="chart-legend">${positiveTypes.map((type) => `<span><span class="chart-type-dot" style="background:${colorForType(type.label)}"></span>${escapeHtml(type.label)}</span>`).join('')}</div>`;
+      const unknownNote = breakdown.unknownRows.length ? `<p class="breakdown-note">Company not identified: ${countButton(breakdown.unknownRows.length, 'unknown_company', '', 'Company not identified · New tickets')}</p>` : '';
+      document.getElementById('overview-company-bars').innerHTML = (companyRows ? legend + `<div class="ticket-chart">${axis('Company', companyMax)}${companyRows}</div>` : '<p class="breakdown-note">No company data for these filters.</p>') + unknownNote;
+      const pairedBar = (count, max, color, series, kind, value, label) => `<div class="paired-bar"><span>${series}</span><div class="ticket-bar-track"><div class="ticket-bar-stack" style="width:${count / max * 100}%">${kind ? segment(count, count || 1, color, kind, value, label) : `<span style="width:100%;background:${color}" title="${escapeHtml(label)}: ${number(count)}"></span>`}</div></div><span style="text-align:right">${kind ? countButton(count, kind, value, label) : number(count)}</span></div>`;
+      const typeMax = chartMax(breakdown.types.flatMap((type) => [type.count, type.previous]));
+      const typeRows = breakdown.types.map((type) => `<div class="chart-row"><div class="chart-row-name"><span class="chart-type-dot" style="background:${colorForType(type.label)}"></span>${escapeHtml(type.label)}</div><div class="chart-row-track">${pairedBar(type.count, typeMax, colorForType(type.label), 'Current', 'type', type.label, type.label + ' · New tickets')}${pairedBar(type.previous, typeMax, '#64748b', 'Previous', '', '', type.label + ' · Previous period')}</div><div class="chart-row-value"><span class="chart-share">${type.share}%<br>of new</span></div></div>`).join('');
+      document.getElementById('overview-category-bars').innerHTML = typeRows ? `<div class="ticket-chart">${axis('Ticket type', typeMax, true)}${typeRows}</div>` : '<p class="breakdown-note">No tickets for these filters.</p>';
+      const days = overview.weekDays.filter((day) => day.key <= formatDateInputValue(overview.comparison.effectiveEnd));
+      const dailyMax = chartMax(days.flatMap((day) => [day.opened, day.closed]));
+      const dailyRows = days.map((day) => `<div class="chart-row"><div class="chart-row-name">${escapeHtml(day.label)} ${escapeHtml(day.fullLabel)}</div><div class="chart-row-track">${pairedBar(day.opened, dailyMax, '#60a5fa', 'New', 'day_new', day.key, day.fullLabel + ' · New tickets')}${pairedBar(day.closed, dailyMax, '#34d399', 'Closed', 'day_closed', day.key, day.fullLabel + ' · Closed tickets')}</div><div></div></div>`).join('');
+      document.getElementById('overview-daily-activity').innerHTML = dailyRows ? `<div class="ticket-chart">${axis('Date', dailyMax, true)}${dailyRows}</div>` : '<p class="breakdown-note">No elapsed dates in this range yet.</p>';
       document.querySelectorAll('[data-breakdown-kind]').forEach((button) => {
         button.addEventListener('click', () => {
           breakdownSelection = {kind:button.getAttribute('data-breakdown-kind'), value:button.getAttribute('data-breakdown-value'), type:button.getAttribute('data-breakdown-type'), label:button.getAttribute('data-breakdown-label')};
