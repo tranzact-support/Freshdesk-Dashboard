@@ -839,6 +839,105 @@ def get_ticket_custom_field_text(ticket: Dict[str, object], field_name: str) -> 
     return str((custom_fields or {}).get(field_name) or "").strip()
 
 
+def freshdesk_company_id_for_ticket(ticket: Dict[str, object], requester_company_ids: Dict[int, str]) -> str:
+    company_id = ticket.get("company_id")
+    if company_id not in (None, "", 0):
+        return str(company_id)
+    return requester_company_ids.get(as_int(ticket.get("requester_id")) or 0, "")
+
+
+def ticket_external_company_id(ticket: Dict[str, object]) -> str:
+    for field in ("cf_company_id880506", "cf_company_id"):
+        value = get_ticket_custom_field_text(ticket, field)
+        if re.fullmatch(r"[0-9]+|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", value):
+            return value.lower()
+    return ""
+
+
+def resolve_hubspot_companies_by_external_id(
+    tickets: Sequence[Dict[str, object]],
+    hubspot_client: Optional[freshdesk_hubspot_sync.HubSpotClient],
+    fetch_errors: List[str],
+) -> Dict[str, Dict[str, object]]:
+    """Resolve ticket company IDs through exact matches on deals and their companies."""
+    if hubspot_client is None:
+        return {}
+    external_ids = sorted({ticket_external_company_id(ticket) for ticket in tickets} - {""})
+    deals: Dict[str, Dict[str, object]] = {}
+
+    def read_batch(path: str, identifiers: Sequence[str], properties: Optional[List[str]] = None) -> List[Dict]:
+        results: List[Dict] = []
+        for offset in range(0, len(identifiers), 100):
+            payload: Dict[str, object] = {"inputs": [{"id": value} for value in identifiers[offset:offset + 100]]}
+            if properties is not None:
+                payload["properties"] = properties
+            try:
+                code, data, _ = hubspot_client.request("POST", path, payload)
+                if code not in (200, 207) or not isinstance(data, dict):
+                    fetch_errors.append(f"hubspot company ID resolution {path}: HTTP {code}")
+                    continue
+                results.extend(data.get("results") or [])
+                if data.get("errors"):
+                    fetch_errors.append(f"hubspot company ID resolution {path}: partial response")
+            except (OSError, ValueError, freshdesk_hubspot_sync.HttpError) as exc:
+                fetch_errors.append(f"hubspot company ID resolution {path}: {exc}")
+        return results
+
+    for numeric, property_name in ((False, "deal_companyid_v2"), (True, "deal_companyid")):
+        identifiers = [value for value in external_ids if value.isdigit() == numeric]
+        for offset in range(0, len(identifiers), 50):
+            values = identifiers[offset:offset + 50]
+            payload = {
+                "filterGroups": [{"filters": [{"propertyName": property_name, "operator": "IN", "values": values}]}],
+                "properties": [property_name, "hs_lastmodifieddate"], "limit": 100,
+            }
+            seen_pages = set()
+            while True:
+                try:
+                    code, data, _ = hubspot_client.request("POST", "/crm/v3/objects/deals/search", payload)
+                    if code != 200 or not isinstance(data, dict):
+                        fetch_errors.append(f"hubspot exact company ID search: HTTP {code}")
+                        break
+                    for deal in data.get("results") or []:
+                        external_id = str((deal.get("properties") or {}).get(property_name) or "").lower()
+                        if external_id in values:
+                            deals[str(deal["id"])] = {"external_id": external_id, "modified_at": str((deal.get("properties") or {}).get("hs_lastmodifieddate") or "")}
+                    after = ((data.get("paging") or {}).get("next") or {}).get("after")
+                    if after is None or str(after) in seen_pages:
+                        break
+                    seen_pages.add(str(after))
+                    payload["after"] = after
+                except (OSError, ValueError, freshdesk_hubspot_sync.HttpError) as exc:
+                    fetch_errors.append(f"hubspot exact company ID search: {exc}")
+                    break
+
+    associations = read_batch("/crm/v3/associations/deals/companies/batch/read", sorted(deals))
+    companies_by_deal: Dict[str, set] = {}
+    for association in associations:
+        deal_id = str((association.get("from") or {}).get("id") or "")
+        companies_by_deal.setdefault(deal_id, set()).update(str(item["id"]) for item in association.get("to") or [] if item.get("id"))
+    company_ids = sorted({company_id for values in companies_by_deal.values() for company_id in values})
+    company_names = {
+        str(company["id"]): str((company.get("properties") or {}).get("name") or "").strip()
+        for company in read_batch("/crm/v3/objects/companies/batch/read", company_ids, ["name"])
+    }
+    contexts: Dict[str, Dict[str, object]] = {}
+    for external_id in external_ids:
+        matched_deals = [deal_id for deal_id, deal in deals.items() if deal["external_id"] == external_id]
+        associated_ids = {company_id for deal_id in matched_deals for company_id in companies_by_deal.get(deal_id, set())}
+        # Avoid guessing when a company ID points at multiple associated companies.
+        if len(associated_ids) != 1:
+            if len(associated_ids) > 1:
+                fetch_errors.append(f"hubspot company ID {external_id}: ambiguous company associations")
+            continue
+        company_name = company_names.get(next(iter(associated_ids)), "")
+        if not company_name:
+            continue
+        matched_deals.sort(key=lambda deal_id: (deals[deal_id]["modified_at"], deal_id), reverse=True)
+        contexts[external_id] = {"name": company_name, "deal_ids": matched_deals}
+    return contexts
+
+
 def sync_hubspot_deal_url_field(
     client: FreshdeskClient,
     ticket_id: int,
@@ -960,6 +1059,27 @@ def enrich_hubspot_context(
         primary_url = build_hubspot_deal_url(hubspot_ui_domain, hubspot_portal_id, deal_ids[0])
         if primary_url:
             primary_deal_url_by_ticket[ticket_id] = primary_url
+
+    tickets_missing_company = [
+        ticket for ticket in tickets
+        if not company_names_by_ticket.get(as_int(ticket.get("id")) or 0)
+        and str(ticket.get("_freshdesk_company_name") or "").strip().lower() in {"", "unknown"}
+    ]
+    external_company_contexts = resolve_hubspot_companies_by_external_id(
+        tickets_missing_company, hubspot_client, fetch_errors
+    )
+    for ticket in tickets_missing_company:
+        ticket_id = as_int(ticket.get("id")) or 0
+        context = external_company_contexts.get(ticket_external_company_id(ticket))
+        if ticket_id <= 0 or context is None:
+            continue
+        company_names_by_ticket[ticket_id] = str(context["name"])
+        deal_ids = context["deal_ids"]
+        if deal_ids and not primary_deal_url_by_ticket.get(ticket_id):
+            url = build_hubspot_deal_url(hubspot_ui_domain, hubspot_portal_id, str(deal_ids[0]))
+            if url:
+                primary_deal_url_by_ticket[ticket_id] = url
+                deal_count_by_ticket[ticket_id] = len(deal_ids)
 
     company_names_missing_deals = sorted(
         {
@@ -1113,6 +1233,7 @@ def build_row(
         "priority_label": priority_label(ticket.get("priority")),
         "type": normalize_ticket_type(ticket.get("type")),
         "freshdesk_company_name": str(ticket.get("_freshdesk_company_name") or "").strip() or "Unknown",
+        "company_external_id": ticket_external_company_id(ticket),
         "company_name": str(ticket.get("_company_name") or "").strip() or "Unknown",
         "hubspot_deal_url": str(ticket.get("_hubspot_deal_url") or "").strip(),
         "hubspot_deal_count": as_int(ticket.get("_hubspot_deal_count")) or 0,
@@ -1257,6 +1378,7 @@ def write_csv(path: Path, rows: Sequence[Dict[str, object]]) -> None:
         "type",
         "company_name",
         "freshdesk_company_name",
+        "company_external_id",
         "hubspot_deal_url",
         "hubspot_deal_count",
         "hubspot_deal_stage",
@@ -2642,7 +2764,11 @@ def main() -> int:
         except HttpError as exc:
             fetch_errors.append(f"requester {requester_id}: {exc}")
 
-    company_ids = sorted({company_id for company_id in requester_company_ids.values() if company_id})
+    company_ids = sorted({
+        company_id for company_id in (
+            freshdesk_company_id_for_ticket(ticket, requester_company_ids) for ticket in tickets
+        ) if company_id
+    })
     company_names: Dict[str, str] = {}
     for company_id in company_ids:
         cached_company_name = company_name_cache.get(company_id, "").strip()
@@ -2658,7 +2784,7 @@ def main() -> int:
 
     for ticket in tickets:
         requester_id = as_int(ticket.get("requester_id")) or 0
-        company_id = requester_company_ids.get(requester_id, "")
+        company_id = freshdesk_company_id_for_ticket(ticket, requester_company_ids)
         ticket["_freshdesk_company_name"] = company_names.get(company_id, "")
 
     (
@@ -2744,7 +2870,7 @@ def main() -> int:
         ticket_updated_at = str(ticket.get("updated_at") or "")
         responder_id = as_int(ticket.get("responder_id")) or 0
         requester_id = as_int(ticket.get("requester_id")) or 0
-        company_id = requester_company_ids.get(requester_id, "")
+        company_id = freshdesk_company_id_for_ticket(ticket, requester_company_ids)
         ticket_payload = dict(ticket)
         ticket_payload["_responder_name"] = agent_names.get(responder_id, "")
         freshdesk_company_name = company_names.get(company_id, "")

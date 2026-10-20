@@ -342,6 +342,10 @@ Useful routes:
 - `/download.csv` CSV export
 - `/refresh` refresh trigger used by the dashboard button
 
+### Company name lookup
+
+The dashboard uses the company assigned to the Freshdesk ticket, then the requester's company, together with existing HubSpot context. For unresolved tickets, it also reads the company ID from `cf_company_id880506` (or `cf_company_id`) and finds exact HubSpot deal matches using `deal_companyid_v2` (or the numeric `deal_companyid`). The associated HubSpot company supplies the name and matching deal link, so deal-stage filters include these tickets too. Ambiguous matches remain unresolved rather than selecting a company by name alone.
+
 ### Deal stage filter
 
 The **Deal stage** dropdown applies across Ticket Progress, Ticket Pipeline, and Email Alert. Cards, comparisons, charts, and ticket lists follow the selected stage together with the date, category, and other filters.
