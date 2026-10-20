@@ -1619,6 +1619,10 @@ def build_dashboard_html(
     .attention-title { font-weight:700; }
     .attention-meta { color:#94a3b8; font-size:12px; margin-top:4px; }
     .attention-reason { margin-top:8px; font-size:13px; }
+    .bug-label { display:inline-block; color:#fca5a5; background:rgba(239,68,68,.14); border:1px solid #ef4444; border-radius:5px; padding:2px 7px; font-weight:700; }
+    .bug-text { color:#fca5a5; font-weight:600; }
+    .breakdown-count.bug-count, .chart-type-counts .breakdown-count.bug-count { color:#fca5a5; font-weight:600; }
+    .bug-chart-row .chart-row-name { color:#fca5a5; border-left:3px solid #ef4444; padding-left:9px; }
     .snapshot-flag { display:inline-flex; align-items:center; gap:6px; margin-top:6px; flex-wrap:wrap; }
     .next-step { font-weight:600; color:#bfdbfe; }
     @media (max-width: 1200px) {
@@ -1782,7 +1786,7 @@ def build_dashboard_html(
         { id: 'ticket', sortValue: (row) => row.ticket_id, label: 'ID', default: true, className: 'id', render: (row) => `<a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a>` },
         { id: 'subject', label: 'Subject', default: true, className: 'subject', render: (row) => `<strong>${escapeHtml(row.subject)}</strong><div class="small">Priority: ${escapeHtml(row.priority_label || '-')} • Owner: ${escapeHtml(displayAgentName(row))}</div>` },
         { id: 'status', label: 'Status', default: true, render: (row) => escapeHtml(row.status_label || '') },
-        { id: 'type', label: 'Category', default: true, render: (row) => escapeHtml(row.type || '') },
+        { id: 'type', label: 'Category', default: true, render: (row) => ticketTypeCell(row.type) },
         { id: 'company', label: 'Company', default: true, render: (row) => escapeHtml(row.company_name || 'Unknown') },
         { id: 'deal_stage', label: 'HubSpot deal stage', default: true, render: (row) => escapeHtml(dealStageLabel(row)) },
         { id: 'hubspot', label: 'HubSpot Deal', default: true, render: (row) => hubspotDealCell(row) },
@@ -1797,8 +1801,8 @@ def build_dashboard_html(
       ],
       sla: [
         { id: 'ticket', sortValue: (row) => row.ticket_id, label: 'ID', default: true, className: 'id', render: (row) => `<a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a>` },
-        { id: 'subject', label: 'Subject', default: true, className: 'subject', render: (row) => `<strong>${escapeHtml(row.subject)}</strong><div class="small">Status: ${escapeHtml(row.status_label)} • Type: ${escapeHtml(row.type || '')}</div>` },
-        { id: 'sla_category', label: 'Category', default: true, render: (row) => escapeHtml(row.sla_category || '') },
+        { id: 'subject', label: 'Subject', default: true, className: 'subject', render: (row) => `<strong>${escapeHtml(row.subject)}</strong><div class="small">Status: ${escapeHtml(row.status_label)} • Type: ${ticketTypeCell(row.type)}</div>` },
+        { id: 'sla_category', label: 'Category', default: true, render: (row) => ticketTypeCell(row.sla_category) },
         { id: 'priority', label: 'Priority', default: true, render: (row) => escapeHtml(row.priority_label || '') },
         { id: 'company', label: 'Company', default: true, render: (row) => escapeHtml(row.company_name || 'Unknown') },
         { id: 'deal_stage', label: 'HubSpot deal stage', default: true, render: (row) => escapeHtml(dealStageLabel(row)) },
@@ -1818,7 +1822,7 @@ def build_dashboard_html(
         { id: 'subject', label: 'Ticket Snapshot', default: true, className: 'subject', render: (row) => `<strong>${escapeHtml(row.subject)}</strong><div class="small">${escapeHtml(row._overview_reason || row.last_action_label || 'Quick snapshot')}</div>` },
         { id: 'company', label: 'Company', default: true, render: (row) => escapeHtml(row.company_name || 'Unknown') },
         { id: 'deal_stage', label: 'HubSpot deal stage', default: true, render: (row) => escapeHtml(dealStageLabel(row)) },
-        { id: 'type', label: 'Category', default: true, render: (row) => escapeHtml(row.type || '') },
+        { id: 'type', label: 'Category', default: true, render: (row) => ticketTypeCell(row.type) },
         { id: 'status', label: 'Stage', default: true, render: (row) => `<div>${escapeHtml(row.status_label || '')}</div><div class="small">${escapeHtml(row.last_action_label || '')}</div>` },
         { id: 'owner', label: 'Owner', default: true, render: (row) => `<div>${escapeHtml(displayAgentName(row))}</div><div class="small">${escapeHtml(row.owner_team || '')}</div>` },
         { id: 'stuck', label: 'Where Stuck', default: true, render: (row) => `<div>${escapeHtml(overviewBottleneckText(row))}</div><div class="small">${escapeHtml(row.last_activity_type || '')}</div>` },
@@ -1863,6 +1867,11 @@ def build_dashboard_html(
       return acc;
     }, {});
     function escapeHtml(text) { return String(text || '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'); }
+    function isBugType(value) { return String(value || '').trim().toLowerCase() === 'bug'; }
+    function ticketTypeCell(value) {
+      const label = escapeHtml(value || '');
+      return isBugType(value) ? `<span class="bug-label">${label}</span>` : label;
+    }
     function displayAgentName(row) {
       const currentName = String(row.last_activity_user_name || '').trim();
       if (currentName && !/^Agent ID\s+\d+$/.test(currentName)) return currentName;
@@ -2277,9 +2286,9 @@ def build_dashboard_html(
       const breakdown = overview.breakdown;
       const number = (value) => Number(value).toLocaleString('en-IN');
       const countButton = (count, kind, value, label, type = '') => count
-        ? `<button type="button" class="breakdown-count" data-breakdown-kind="${kind}" data-breakdown-value="${escapeHtml(value)}" data-breakdown-type="${escapeHtml(type)}" data-breakdown-label="${escapeHtml(label)}" aria-label="${escapeHtml(label)}: ${number(count)} tickets">${number(count)}</button>` : '0';
-      const colors = ['#38bdf8', '#fbbf24', '#fb7185', '#a78bfa', '#34d399', '#f472b6'];
-      const colorForType = (label) => ({'Bug':'#fb7185','Feature Idea':'#a78bfa','Task - Backend':'#38bdf8','Task - Experience Team':'#fbbf24','Unspecified':'#94a3b8'}[label] || colors[[...label].reduce((value, char) => value + char.charCodeAt(0), 0) % colors.length]);
+        ? `<button type="button" class="breakdown-count ${(isBugType(type) || (kind === 'type' && isBugType(value))) ? 'bug-count' : ''}" data-breakdown-kind="${kind}" data-breakdown-value="${escapeHtml(value)}" data-breakdown-type="${escapeHtml(type)}" data-breakdown-label="${escapeHtml(label)}" aria-label="${escapeHtml(label)}: ${number(count)} tickets">${number(count)}</button>` : '0';
+      const colors = ['#38bdf8', '#fbbf24', '#22d3ee', '#a78bfa', '#34d399', '#f472b6'];
+      const colorForType = (label) => ({'Bug':'#ef4444','Feature Idea':'#a78bfa','Task - Backend':'#38bdf8','Task - Experience Team':'#fbbf24','Unspecified':'#94a3b8'}[label] || colors[[...label].reduce((value, char) => value + char.charCodeAt(0), 0) % colors.length]);
       const attrs = (kind, value, label, type = '') => `data-breakdown-kind="${kind}" data-breakdown-value="${escapeHtml(value)}" data-breakdown-type="${escapeHtml(type)}" data-breakdown-label="${escapeHtml(label)}"`;
       const segment = (count, total, color, kind, value, label, type = '') => count
         ? `<button type="button" class="ticket-bar-segment" style="width:${count / total * 100}%;background:${color}" ${attrs(kind, value, label, type)} title="${escapeHtml(label)}: ${number(count)}" aria-label="${escapeHtml(label)}: ${number(count)} tickets"></button>` : '';
@@ -2290,15 +2299,15 @@ def build_dashboard_html(
       const companyRows = overview.topCompanies.map((company, index) => {
         const label = company.label + ' · New tickets';
         const segments = positiveTypes.map((type) => segment(company.byType.get(type.label) || 0, company.total, colorForType(type.label), 'company_type', company.label, company.label + ' · ' + type.label, type.label)).join('');
-        const typeCounts = positiveTypes.filter((type) => company.byType.get(type.label)).map((type) => `<span><span class="chart-type-dot" style="background:${colorForType(type.label)}"></span><button type="button" class="breakdown-count" ${attrs('company_type', company.label, company.label + ' · ' + type.label, type.label)}>${escapeHtml(type.label)} ${number(company.byType.get(type.label))}</button></span>`).join('');
+        const typeCounts = positiveTypes.filter((type) => company.byType.get(type.label)).map((type) => `<span><span class="chart-type-dot" style="background:${colorForType(type.label)}"></span><button type="button" class="breakdown-count ${isBugType(type.label) ? 'bug-count' : ''}" ${attrs('company_type', company.label, company.label + ' · ' + type.label, type.label)}>${escapeHtml(type.label)} ${number(company.byType.get(type.label))}</button></span>`).join('');
         return `<div class="chart-row"><div class="chart-row-name">${index + 1}. ${escapeHtml(company.label)}</div><div class="chart-row-track"><div class="ticket-bar-track"><div class="ticket-bar-stack" style="width:${company.total / companyMax * 100}%">${segments}</div></div><div class="chart-type-counts">${typeCounts}</div></div><div class="chart-row-value">${countButton(company.total, 'company', company.label, label)}</div></div>`;
       }).join('');
-      const legend = `<div class="chart-legend">${positiveTypes.map((type) => `<span><span class="chart-type-dot" style="background:${colorForType(type.label)}"></span>${escapeHtml(type.label)}</span>`).join('')}</div>`;
+      const legend = `<div class="chart-legend">${positiveTypes.map((type) => `<span class="${isBugType(type.label) ? 'bug-text' : ''}"><span class="chart-type-dot" style="background:${colorForType(type.label)}"></span>${escapeHtml(type.label)}</span>`).join('')}</div>`;
       const unknownNote = breakdown.unknownRows.length ? `<p class="breakdown-note">Company not identified: ${countButton(breakdown.unknownRows.length, 'unknown_company', '', 'Company not identified · New tickets')}</p>` : '';
       document.getElementById('overview-company-bars').innerHTML = (companyRows ? legend + `<div class="ticket-chart">${axis('Company', companyMax)}${companyRows}</div>` : '<p class="breakdown-note">No company data for these filters.</p>') + unknownNote;
       const pairedBar = (count, max, color, series, kind, value, label) => `<div class="paired-bar"><span>${series}</span><div class="ticket-bar-track"><div class="ticket-bar-stack" style="width:${count / max * 100}%">${kind ? segment(count, count || 1, color, kind, value, label) : `<span style="width:100%;background:${color}" title="${escapeHtml(label)}: ${number(count)}"></span>`}</div></div><span style="text-align:right">${kind ? countButton(count, kind, value, label) : number(count)}</span></div>`;
       const typeMax = chartMax(breakdown.types.flatMap((type) => [type.count, type.previous]));
-      const typeRows = breakdown.types.map((type) => `<div class="chart-row"><div class="chart-row-name"><span class="chart-type-dot" style="background:${colorForType(type.label)}"></span>${escapeHtml(type.label)}</div><div class="chart-row-track">${pairedBar(type.count, typeMax, colorForType(type.label), 'Current', 'type', type.label, type.label + ' · New tickets')}${pairedBar(type.previous, typeMax, '#64748b', 'Previous', '', '', type.label + ' · Previous period')}</div><div class="chart-row-value"><span class="chart-share">${type.share}%<br>of new</span></div></div>`).join('');
+      const typeRows = breakdown.types.map((type) => `<div class="chart-row ${isBugType(type.label) ? 'bug-chart-row' : ''}"><div class="chart-row-name"><span class="chart-type-dot" style="background:${colorForType(type.label)}"></span>${escapeHtml(type.label)}</div><div class="chart-row-track">${pairedBar(type.count, typeMax, colorForType(type.label), 'Current', 'type', type.label, type.label + ' · New tickets')}${pairedBar(type.previous, typeMax, '#64748b', 'Previous', '', '', type.label + ' · Previous period')}</div><div class="chart-row-value"><span class="chart-share">${type.share}%<br>of new</span></div></div>`).join('');
       document.getElementById('overview-category-bars').innerHTML = typeRows ? `<div class="ticket-chart">${axis('Ticket type', typeMax, true)}${typeRows}</div>` : '<p class="breakdown-note">No tickets for these filters.</p>';
       const days = overview.weekDays.filter((day) => day.key <= formatDateInputValue(overview.comparison.effectiveEnd));
       const dailyMax = chartMax(days.flatMap((day) => [day.opened, day.closed]));
@@ -2318,7 +2327,7 @@ def build_dashboard_html(
     function renderCheckboxGroup(containerId, options, allLabel, searchable = false) {
       const container = document.getElementById(containerId);
       const searchHtml = searchable ? `<input class="filter-search" type="search" placeholder="Search..." data-filter-search="${containerId}">` : '';
-      container.innerHTML = [searchHtml, `<label class="filter-item"><input type="checkbox" value="all" checked> ${allLabel}</label>`, ...options.map((value) => `<label class="filter-item"><input type="checkbox" value="${escapeHtml(value)}"> ${escapeHtml(value)}</label>`)].join('');
+      container.innerHTML = [searchHtml, `<label class="filter-item"><input type="checkbox" value="all" checked> ${allLabel}</label>`, ...options.map((value) => `<label class="filter-item"><input type="checkbox" value="${escapeHtml(value)}"> ${ticketTypeCell(value)}</label>`)].join('');
     }
     function selectedValues(elementId) { return Array.from(document.querySelectorAll(`#${elementId} input:checked`)).map((input) => input.value); }
     function matchesMulti(value, selections) { return selections.length === 0 || selections.includes('all') || selections.includes(value || ''); }
