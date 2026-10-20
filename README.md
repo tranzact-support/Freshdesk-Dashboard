@@ -344,7 +344,7 @@ Useful routes:
 
 ### Company name lookup
 
-The dashboard uses the company assigned to the Freshdesk ticket, then the requester's company, together with existing HubSpot context. For unresolved tickets, it also reads the company ID from `cf_company_id880506` (or `cf_company_id`) and finds exact HubSpot deal matches using `deal_companyid_v2` (or the numeric `deal_companyid`). The associated HubSpot company supplies the name and matching deal link, so deal-stage filters include these tickets too. Ambiguous matches remain unresolved rather than selecting a company by name alone.
+The dashboard uses the company assigned to the Freshdesk ticket, then the requester's company, together with existing HubSpot context. For tickets with an unresolved company or missing deal, it also reads the company ID from `cf_company_id880506` (or `cf_company_id`) and finds exact HubSpot deal matches using `deal_companyid_v2` (or the numeric `deal_companyid`). The associated HubSpot company supplies the name and matching deal link, so deal-stage filters include these tickets too. Freshdesk-native IDs accidentally stored in custom fields are excluded; valid UUID and legacy numeric company IDs are checked. Exact ID matches take priority over name searches, and substring or ambiguous name matches are rejected.
 
 ### Company and ticket-type breakdowns
 

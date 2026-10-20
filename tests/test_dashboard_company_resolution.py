@@ -96,5 +96,51 @@ class CompanyResolutionTests(unittest.TestCase):
         contexts = d.resolve_hubspot_companies_by_external_id([self.ticket(A), self.ticket(B)], Paged(), [])
         self.assertEqual(set(contexts), {A, B})
         self.assertEqual(contexts[B]['deal_ids'], ['2'])
+    def test_freshdesk_id_in_v2_field_uses_legacy_company_id(self):
+        ticket = {'company_id': 84000837049, 'custom_fields': {'cf_company_id880506': '84000837049', 'cf_company_id': 625591}}
+        self.assertEqual(d.ticket_external_company_ids(ticket), ['625591'])
+        self.assertEqual(d.ticket_external_company_id(ticket), '625591')
+
+    def test_known_company_with_missing_deal_uses_exact_id(self):
+        ticket = {'id': 15598, 'company_id': 84000837049, '_freshdesk_company_name': 'manjunath',
+                  'custom_fields': {'cf_company_id880506': '84000837049', 'cf_company_id': 625591}}
+        with tempfile.TemporaryDirectory() as folder:
+            d.write_json(Path(folder) / '.hubspot_company_deal_cache.json', {'company_deals': {'manjunath': 'Wrong Company||0'}})
+            names, urls, counts, _ = d.enrich_hubspot_context(client=NoWrites(), tickets=[ticket], ticket_map={}, output_dir=Path(folder),
+                hubspot_client=HubSpot(), hubspot_ui_domain='app.hubspot.com', hubspot_portal_id='1',
+                hubspot_deal_url_field='cf_hubspot_deal_url', fetch_errors=[])
+            self.assertEqual(names[15598], 'Aceme Industries')
+            self.assertTrue(urls[15598].endswith('/1'))
+            self.assertEqual(counts[15598], 1)
+
+    def test_legacy_id_fallback_when_v2_has_no_match(self):
+        class LegacyOnly(HubSpot):
+            def request(self, method, path, payload):
+                if path.endswith('/deals/search') and payload['filterGroups'][0]['filters'][0]['propertyName'] == 'deal_companyid_v2':
+                    return 200, {'results': []}, ''
+                return super().request(method, path, payload)
+        ticket = self.ticket()
+        ticket['custom_fields']['cf_company_id'] = 625591
+        with tempfile.TemporaryDirectory() as folder:
+            names, urls, _, _ = d.enrich_hubspot_context(client=NoWrites(), tickets=[ticket], ticket_map={}, output_dir=Path(folder),
+                hubspot_client=LegacyOnly(), hubspot_ui_domain='app.hubspot.com', hubspot_portal_id='1',
+                hubspot_deal_url_field='cf_hubspot_deal_url', fetch_errors=[])
+            self.assertEqual(names[18669], 'Aceme Industries')
+            self.assertTrue(urls[18669].endswith('/1'))
+
+    def test_name_lookup_rejects_substrings_and_duplicates(self):
+        wrong = {'id': '2', 'properties': {'name': 'MANJUNATHA ENGG INC'}}
+        exact = {'id': '3', 'properties': {'name': 'manjunath'}}
+        self.assertIsNone(d.choose_best_hubspot_company_match('manjunath', [wrong]))
+        self.assertIs(d.choose_best_hubspot_company_match('manjunath', [wrong, exact]), exact)
+        self.assertIsNone(d.choose_best_hubspot_company_match('manjunath', [exact, dict(exact)]))
+
+    def test_same_deal_found_by_both_id_versions(self):
+        ticket = self.ticket()
+        ticket['custom_fields']['cf_company_id'] = 625591
+        contexts = d.resolve_hubspot_companies_by_external_id([ticket], HubSpot(), [])
+        self.assertEqual(set(contexts), {A, '625591'})
+        self.assertEqual(contexts[A]['deal_ids'], contexts['625591']['deal_ids'])
+
 if __name__ == '__main__':
     unittest.main()

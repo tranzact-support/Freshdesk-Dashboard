@@ -846,12 +846,24 @@ def freshdesk_company_id_for_ticket(ticket: Dict[str, object], requester_company
     return requester_company_ids.get(as_int(ticket.get("requester_id")) or 0, "")
 
 
+def ticket_external_company_ids(ticket: Dict[str, object]) -> List[str]:
+    values = [get_ticket_custom_field_text(ticket, field) for field in ("cf_company_id880506", "cf_company_id")]
+    identifiers = []
+    native_company_id = str(ticket.get("company_id") or "")
+    # Some tickets put a Freshdesk company ID in the V2 field. It is not a TranZact ID.
+    for value in values:
+        if re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", value):
+            identifiers.append(value.lower())
+    # The original field contains the legacy numeric TranZact company ID.
+    for value in reversed(values):
+        if value.isdigit() and value != native_company_id:
+            identifiers.append(value)
+    return list(dict.fromkeys(identifiers))
+
+
 def ticket_external_company_id(ticket: Dict[str, object]) -> str:
-    for field in ("cf_company_id880506", "cf_company_id"):
-        value = get_ticket_custom_field_text(ticket, field)
-        if re.fullmatch(r"[0-9]+|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", value):
-            return value.lower()
-    return ""
+    identifiers = ticket_external_company_ids(ticket)
+    return identifiers[0] if identifiers else ""
 
 
 def resolve_hubspot_companies_by_external_id(
@@ -862,7 +874,7 @@ def resolve_hubspot_companies_by_external_id(
     """Resolve ticket company IDs through exact matches on deals and their companies."""
     if hubspot_client is None:
         return {}
-    external_ids = sorted({ticket_external_company_id(ticket) for ticket in tickets} - {""})
+    external_ids = sorted({identifier for ticket in tickets for identifier in ticket_external_company_ids(ticket)})
     deals: Dict[str, Dict[str, object]] = {}
 
     def read_batch(path: str, identifiers: Sequence[str], properties: Optional[List[str]] = None) -> List[Dict]:
@@ -889,7 +901,7 @@ def resolve_hubspot_companies_by_external_id(
             values = identifiers[offset:offset + 50]
             payload = {
                 "filterGroups": [{"filters": [{"propertyName": property_name, "operator": "IN", "values": values}]}],
-                "properties": [property_name, "hs_lastmodifieddate"], "limit": 100,
+                "properties": ["deal_companyid", "deal_companyid_v2", "hs_lastmodifieddate"], "limit": 100,
             }
             seen_pages = set()
             while True:
@@ -901,7 +913,13 @@ def resolve_hubspot_companies_by_external_id(
                     for deal in data.get("results") or []:
                         external_id = str((deal.get("properties") or {}).get(property_name) or "").lower()
                         if external_id in values:
-                            deals[str(deal["id"])] = {"external_id": external_id, "modified_at": str((deal.get("properties") or {}).get("hs_lastmodifieddate") or "")}
+                            properties = deal.get("properties") or {}
+                            record = deals.setdefault(str(deal["id"]), {
+                                "external_ids": set(),
+                                "modified_at": str(properties.get("hs_lastmodifieddate") or ""),
+                                "canonical_id": str(properties.get("deal_companyid_v2") or "").lower(),
+                            })
+                            record["external_ids"].add(external_id)
                     after = ((data.get("paging") or {}).get("next") or {}).get("after")
                     if after is None or str(after) in seen_pages:
                         break
@@ -923,7 +941,7 @@ def resolve_hubspot_companies_by_external_id(
     }
     contexts: Dict[str, Dict[str, object]] = {}
     for external_id in external_ids:
-        matched_deals = [deal_id for deal_id, deal in deals.items() if deal["external_id"] == external_id]
+        matched_deals = [deal_id for deal_id, deal in deals.items() if external_id in deal["external_ids"]]
         associated_ids = {company_id for deal_id in matched_deals for company_id in companies_by_deal.get(deal_id, set())}
         # Avoid guessing when a company ID points at multiple associated companies.
         if len(associated_ids) != 1:
@@ -934,7 +952,12 @@ def resolve_hubspot_companies_by_external_id(
         if not company_name:
             continue
         matched_deals.sort(key=lambda deal_id: (deals[deal_id]["modified_at"], deal_id), reverse=True)
-        contexts[external_id] = {"name": company_name, "deal_ids": matched_deals}
+        canonical_ids = {str(deals[deal_id]["canonical_id"]) for deal_id in matched_deals} - {""}
+        contexts[external_id] = {
+            "name": company_name,
+            "deal_ids": matched_deals,
+            "company_external_id": next(iter(canonical_ids)) if len(canonical_ids) == 1 else external_id,
+        }
     return contexts
 
 
@@ -962,29 +985,14 @@ def choose_best_hubspot_company_match(
     matches: Sequence[Dict[str, object]],
 ) -> Optional[Dict[str, object]]:
     normalized_target = normalize_company_lookup_name(freshdesk_company_name)
-    exact_matches: List[Dict[str, object]] = []
-    loose_matches: List[Dict[str, object]] = []
-    for item in matches:
-        properties = item.get("properties") if isinstance(item.get("properties"), dict) else {}
-        candidate_name = str((properties or {}).get("name") or "").strip()
-        normalized_candidate = normalize_company_lookup_name(candidate_name)
-        if not normalized_candidate:
-            continue
-        if normalized_candidate == normalized_target:
-            exact_matches.append(item)
-        elif normalized_target and (
-            normalized_target in normalized_candidate or normalized_candidate in normalized_target
-        ):
-            loose_matches.append(item)
-    if len(exact_matches) == 1:
-        return exact_matches[0]
-    if exact_matches:
-        return exact_matches[0]
-    if len(loose_matches) == 1:
-        return loose_matches[0]
-    if len(matches) == 1:
-        return matches[0]
-    return loose_matches[0] if loose_matches else None
+    if not normalized_target:
+        return None
+    exact_matches = [
+        item for item in matches
+        if normalize_company_lookup_name((item.get("properties") or {}).get("name")) == normalized_target
+    ]
+    # A person/short name can match unrelated companies. Never select a substring match.
+    return exact_matches[0] if len(exact_matches) == 1 else None
 
 
 def enrich_hubspot_context(
@@ -1060,20 +1068,23 @@ def enrich_hubspot_context(
         if primary_url:
             primary_deal_url_by_ticket[ticket_id] = primary_url
 
-    tickets_missing_company = [
+    tickets_needing_context = [
         ticket for ticket in tickets
-        if not company_names_by_ticket.get(as_int(ticket.get("id")) or 0)
-        and str(ticket.get("_freshdesk_company_name") or "").strip().lower() in {"", "unknown"}
+        if not primary_deal_url_by_ticket.get(as_int(ticket.get("id")) or 0)
+        or (not company_names_by_ticket.get(as_int(ticket.get("id")) or 0)
+            and str(ticket.get("_freshdesk_company_name") or "").strip().lower() in {"", "unknown"})
     ]
     external_company_contexts = resolve_hubspot_companies_by_external_id(
-        tickets_missing_company, hubspot_client, fetch_errors
+        tickets_needing_context, hubspot_client, fetch_errors
     )
-    for ticket in tickets_missing_company:
+    for ticket in tickets_needing_context:
         ticket_id = as_int(ticket.get("id")) or 0
-        context = external_company_contexts.get(ticket_external_company_id(ticket))
+        context = next((external_company_contexts[identifier] for identifier in ticket_external_company_ids(ticket)
+                        if identifier in external_company_contexts), None)
         if ticket_id <= 0 or context is None:
             continue
         company_names_by_ticket[ticket_id] = str(context["name"])
+        ticket["_company_external_id"] = context["company_external_id"]
         deal_ids = context["deal_ids"]
         if deal_ids and not primary_deal_url_by_ticket.get(ticket_id):
             url = build_hubspot_deal_url(hubspot_ui_domain, hubspot_portal_id, str(deal_ids[0]))
@@ -1105,7 +1116,8 @@ def enrich_hubspot_context(
             cached_name, cached_url, cached_count = cached_parts
             try:
                 parsed_count = int(cached_count or "0")
-                if cached_name or cached_url or parsed_count > 0:
+                if (cached_url and parsed_count > 0
+                        and normalize_company_lookup_name(cached_name) == cache_key):
                     direct_lookup_results[cache_key] = (cached_name, cached_url, parsed_count)
                     continue
             except ValueError:
@@ -1233,7 +1245,7 @@ def build_row(
         "priority_label": priority_label(ticket.get("priority")),
         "type": normalize_ticket_type(ticket.get("type")),
         "freshdesk_company_name": str(ticket.get("_freshdesk_company_name") or "").strip() or "Unknown",
-        "company_external_id": ticket_external_company_id(ticket),
+        "company_external_id": str(ticket.get("_company_external_id") or ticket_external_company_id(ticket)),
         "company_name": str(ticket.get("_company_name") or "").strip() or "Unknown",
         "hubspot_deal_url": str(ticket.get("_hubspot_deal_url") or "").strip(),
         "hubspot_deal_count": as_int(ticket.get("_hubspot_deal_count")) or 0,
