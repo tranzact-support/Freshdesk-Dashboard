@@ -1753,6 +1753,7 @@ def build_dashboard_html(
         { id: 'status', label: 'Status', default: true, render: (row) => escapeHtml(row.status_label || '') },
         { id: 'type', label: 'Category', default: true, render: (row) => escapeHtml(row.type || '') },
         { id: 'company', label: 'Company', default: true, render: (row) => escapeHtml(row.company_name || 'Unknown') },
+        { id: 'deal_stage', label: 'HubSpot deal stage', default: true, render: (row) => escapeHtml(dealStageLabel(row)) },
         { id: 'hubspot', label: 'HubSpot Deal', default: true, render: (row) => hubspotDealCell(row) },
         { id: 'updated', sortValue: (row) => parseDate(row.updated_at)?.getTime(), label: 'Updated', default: true, render: (row) => `<div>${escapeHtml(row.updated_at_ist || '')}</div><div class="small">${escapeHtml(row.last_action_label || 'Last action')}</div>` },
         { id: 'reply_check', label: 'Reply Check', default: true, render: (row) => `${replyPill(row)}<div class="small">Customer waiting: ${row.customer_reverted ? 'Yes' : 'No'}</div>` },
@@ -1769,6 +1770,7 @@ def build_dashboard_html(
         { id: 'sla_category', label: 'Category', default: true, render: (row) => escapeHtml(row.sla_category || '') },
         { id: 'priority', label: 'Priority', default: true, render: (row) => escapeHtml(row.priority_label || '') },
         { id: 'company', label: 'Company', default: true, render: (row) => escapeHtml(row.company_name || 'Unknown') },
+        { id: 'deal_stage', label: 'HubSpot deal stage', default: true, render: (row) => escapeHtml(dealStageLabel(row)) },
         { id: 'hubspot', label: 'HubSpot Deal', default: true, render: (row) => hubspotDealCell(row) },
         { id: 'created', sortValue: (row) => parseDate(row.created_at)?.getTime(), label: 'Created IST', default: true, render: (row) => escapeHtml(row.created_at_ist || '') },
         { id: 'closed', sortValue: (row) => parseDate(row.closed_at || row.resolved_at)?.getTime(), label: 'Closed IST', default: true, render: (row) => escapeHtml(row.closed_at_ist || row.resolved_at_ist || '') || '<span class="small">Open</span>' },
@@ -1784,6 +1786,7 @@ def build_dashboard_html(
         { id: 'ticket', sortValue: (row) => row.ticket_id, label: 'ID', default: true, className: 'id', render: (row) => `<a href="https://${summary.domain}/a/tickets/${row.ticket_id}" target="_blank" rel="noreferrer">${row.ticket_id}</a>` },
         { id: 'subject', label: 'Ticket Snapshot', default: true, className: 'subject', render: (row) => `<strong>${escapeHtml(row.subject)}</strong><div class="small">${escapeHtml(row._overview_reason || row.last_action_label || 'Quick snapshot')}</div>` },
         { id: 'company', label: 'Company', default: true, render: (row) => escapeHtml(row.company_name || 'Unknown') },
+        { id: 'deal_stage', label: 'HubSpot deal stage', default: true, render: (row) => escapeHtml(dealStageLabel(row)) },
         { id: 'type', label: 'Category', default: true, render: (row) => escapeHtml(row.type || '') },
         { id: 'status', label: 'Stage', default: true, render: (row) => `<div>${escapeHtml(row.status_label || '')}</div><div class="small">${escapeHtml(row.last_action_label || '')}</div>` },
         { id: 'owner', label: 'Owner', default: true, render: (row) => `<div>${escapeHtml(displayAgentName(row))}</div><div class="small">${escapeHtml(row.owner_team || '')}</div>` },
@@ -1799,7 +1802,20 @@ def build_dashboard_html(
     const columnPickerIds = { activity: 'activity-columns', sla: 'sla-columns', overview: 'overview-columns' };
     const defaultColumnState = Object.fromEntries(Object.entries(columnConfigs).map(([view, columns]) => [view, columns.filter((column) => column.default !== false).map((column) => column.id)]));
     const storedColumnState = (() => {
-      try { return JSON.parse(localStorage.getItem('freshdeskDashboardColumnState') || '{}'); }
+      try {
+        const saved = JSON.parse(localStorage.getItem('freshdeskDashboardColumnState') || '{}') || {};
+        // Add the new column once for existing users while keeping their other choices.
+        if (localStorage.getItem('freshdeskDashboardDealStageColumnV1') !== '1') {
+          ['activity', 'sla', 'overview'].forEach((view) => {
+            if (Array.isArray(saved[view]) && saved[view].length && !saved[view].includes('deal_stage')) {
+              saved[view].push('deal_stage');
+            }
+          });
+          localStorage.setItem('freshdeskDashboardColumnState', JSON.stringify(saved));
+          localStorage.setItem('freshdeskDashboardDealStageColumnV1', '1');
+        }
+        return saved;
+      }
       catch (error) { return {}; }
     })();
     const columnState = Object.fromEntries(Object.entries(defaultColumnState).map(([view, defaults]) => {
@@ -2270,7 +2286,7 @@ def build_dashboard_html(
     function hubspotDealCell(row) {
       if (!row.hubspot_deal_url) return '<span class="small">—</span>';
       const suffix = row.hubspot_deal_count > 1 ? ` (+${row.hubspot_deal_count - 1})` : '';
-      return `<a href="${escapeHtml(row.hubspot_deal_url)}" target="_blank" rel="noreferrer">Open Deal</a><div class="small">${escapeHtml(dealStageLabel(row))}${suffix}</div>`;
+      return `<a href="${escapeHtml(row.hubspot_deal_url)}" target="_blank" rel="noreferrer">Open Deal</a><div class="small">HubSpot${suffix}</div>`;
     }
     function yesNoUnknown(value, checked) {
       if (!checked) return '<span class="small">Not checked</span>';

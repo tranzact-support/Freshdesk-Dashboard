@@ -348,6 +348,8 @@ The dashboard uses the company assigned to the Freshdesk ticket, then the reques
 
 ### Deal stage filter
 
+The **HubSpot deal stage** column is shown by default in ticket tables and snapshots. It uses the same live HubSpot data as the stage filter, refreshed on each dashboard build (GitHub Pages runs every six hours). Existing column preferences receive the new column once; you can hide it using **Show / Hide Columns**.
+
 The **Deal stage** dropdown applies across Ticket Progress, Ticket Pipeline, and Email Alert. Cards, comparisons, charts, and ticket lists follow the selected stage together with the date, category, and other filters.
 
 Stages come from the ticket's primary **Open Deal** link in HubSpot and refresh whenever the dashboard data is rebuilt. Pipeline names distinguish stages with the same name. Historical periods are grouped by the deal's current stage at the latest refresh. Choose **All deal stages** to reset, **No linked deal** for tickets without a deal, or **Stage unavailable** when a linked deal's stage could not be fetched.
