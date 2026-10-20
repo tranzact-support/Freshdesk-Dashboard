@@ -1529,6 +1529,18 @@ def build_dashboard_html(
     .overview-results { scroll-margin-top:20px; }
     .overview-results .section-copy { margin-bottom:12px; }
     .overview-details > summary { cursor:pointer; font-size:16px; color:#cbd5e1; padding:16px 0; }
+    .breakdown-panel { margin-top:16px; }
+    .breakdown-panel h3 { margin:0 0 8px; font-size:17px; }
+    .breakdown-panel > summary { cursor:pointer; font-size:16px; }
+    .breakdown-summary { color:#e2e8f0; background:#172033; border-left:3px solid #60a5fa; border-radius:8px; padding:14px 16px; line-height:1.7; }
+    .breakdown-table { min-width:620px; }
+    .breakdown-table th { position:static; color:#cbd5e1; font-weight:500; }
+    .breakdown-table th:not(:first-child), .breakdown-table td:not(:first-child) { text-align:right; }
+    .breakdown-table .company-label { min-width:210px; max-width:350px; overflow-wrap:anywhere; }
+    .breakdown-count { color:#93c5fd; background:transparent; border:0; border-radius:4px; padding:4px 6px; font:inherit; font-weight:600; text-decoration:underline; text-underline-offset:3px; }
+    .breakdown-count:hover { background:#1e3a5f; }
+    .breakdown-count:focus-visible { outline:2px solid #93c5fd; }
+    .breakdown-note { color:#94a3b8; font-size:13px; margin:10px 0 0; line-height:1.6; }
     .overview-details > summary:hover { color:#93c5fd; }
     @media (max-width: 1000px) { .progress-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
     @media (max-width: 540px) { .progress-grid, .attention-grid { grid-template-columns:1fr; } }
@@ -1704,7 +1716,7 @@ def build_dashboard_html(
       </div>
       <div class="overview-section overview-results hidden" id="overview-results">
         <div class="section-head">
-          <h2 class="section-title" id="overview-results-title">Matching tickets</h2>
+          <h2 class="section-title" id="overview-results-title" tabindex="-1">Matching tickets</h2>
           <button type="button" id="overview-clear-selection">Clear selection</button>
         </div>
         <div class="section-copy" id="overview-results-copy"></div>
@@ -1713,29 +1725,24 @@ def build_dashboard_html(
           <tbody id="overview-results-body"></tbody>
         </table></div>
       </div>
-      <details class="overview-section overview-details">
-        <summary>Trends and breakdowns</summary>
-        <div class="overview-grid graphs-grid">
-          <div class="chart-card">
-            <div class="label">Opened vs Closed</div>
-            <div class="subvalue">New and closed tickets by day in the selected dates</div>
-            <div class="line-chart" id="weekly-open-close-chart"></div>
-            <div class="line-labels" id="weekly-open-close-labels"></div>
-            <div class="line-legend"><span><span class="legend-dot" style="background:#2563eb"></span>Opened</span><span><span class="legend-dot" style="background:#22c55e"></span>Closed / Resolved</span></div>
-          </div>
-          <div class="chart-card">
-            <div class="label">Category Queue Progress</div>
-            <div class="subvalue">Open at start, new tickets, and closed tickets by category</div>
-            <div class="mini-bars" id="overview-category-bars"></div>
-            <div class="line-legend"><span><span class="legend-dot" style="background:#f59e0b"></span>Pending From Previous</span><span><span class="legend-dot" style="background:#2563eb"></span>Created In Range</span><span><span class="legend-dot" style="background:#22c55e"></span>Closed In Range</span></div>
-          </div>
-          <div class="chart-card">
-            <div class="label">Top 10 Companies</div>
-            <div class="subvalue">Tickets raised in the selected duration, split by bug, feature, task, and other.</div>
-            <div class="company-progress" id="overview-company-bars"></div>
-            <div class="line-legend"><span><span class="legend-dot" style="background:#ef4444"></span>Bug</span><span><span class="legend-dot" style="background:#8b5cf6"></span>Feature Idea</span><span><span class="legend-dot" style="background:#0ea5e9"></span>Task</span><span><span class="legend-dot" style="background:#64748b"></span>Other</span></div>
-          </div>
+      <details class="overview-section overview-details" open>
+        <summary>Who is raising tickets, and what are they about?</summary>
+        <div class="breakdown-summary" id="overview-breakdown-summary"></div>
+        <div class="chart-card breakdown-panel">
+          <h3>Which companies raised the most tickets?</h3>
+          <p class="section-copy">Ranked by new tickets in the selected dates. Each type has its own count. Click a count to see the tickets.</p>
+          <div id="overview-company-bars"></div>
         </div>
+        <div class="chart-card breakdown-panel">
+          <h3>What types of tickets are being raised?</h3>
+          <p class="section-copy">New tickets only. Compare with the previous period using the same dates as the progress cards above.</p>
+          <div id="overview-category-bars"></div>
+        </div>
+        <details class="chart-card breakdown-panel">
+          <summary>Daily new tickets and closures</summary>
+          <p class="section-copy">Closures can include tickets raised before the selected dates. Future dates are left out.</p>
+          <div id="overview-daily-activity"></div>
+        </details>
       </details>
 
     </div>
@@ -1745,6 +1752,7 @@ def build_dashboard_html(
     const summary = data.summary || {};
     const rows = data.rows || [];
     let currentView = 'activity';
+    let breakdownSelection = null;
     const activeCardFilters = { activity: 'tickets', sla: 'tickets', overview: 'tickets' };
     const columnConfigs = {
       activity: [
@@ -2118,6 +2126,38 @@ def build_dashboard_html(
     function formatOverviewDate(date) {
       return date.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
     }
+    function buildTicketBreakdown(newRows, previousRows) {
+      const typeLabel = (row) => String(row.type || '').trim() || 'Unspecified';
+      const counts = new Map();
+      newRows.forEach((row) => counts.set(typeLabel(row), (counts.get(typeLabel(row)) || 0) + 1));
+      previousRows.forEach((row) => { if (!counts.has(typeLabel(row))) counts.set(typeLabel(row), 0); });
+      const types = [...counts.entries()].map(([label, count]) => ({ label, count,
+        previous:previousRows.filter((row) => typeLabel(row) === label).length,
+        share:newRows.length ? Math.round(count / newRows.length * 100) : 0,
+      })).sort((a,b) => b.count - a.count || a.label.localeCompare(b.label));
+      const companies = new Map();
+      const unknownRows = [];
+      newRows.forEach((row) => {
+        const label = String(row.company_name || '').trim();
+        if (!label || label.toLowerCase() === 'unknown') { unknownRows.push(row); return; }
+        if (!companies.has(label)) companies.set(label, {label, total:0, byType:new Map()});
+        const company = companies.get(label);
+        company.total += 1;
+        company.byType.set(typeLabel(row), (company.byType.get(typeLabel(row)) || 0) + 1);
+      });
+      const rankedCompanies = [...companies.values()].sort((a,b) => b.total - a.total || a.label.localeCompare(b.label));
+      return { types, companies:rankedCompanies, unknownRows, total:newRows.length };
+    }
+    function breakdownTicketRows(selection, newRows, closedRows) {
+      if (!selection) return [];
+      if (selection.kind === 'company') return newRows.filter((row) => String(row.company_name || '').trim() === selection.value);
+      if (selection.kind === 'company_type') return newRows.filter((row) => String(row.company_name || '').trim() === selection.value && (String(row.type || '').trim() || 'Unspecified') === selection.type);
+      if (selection.kind === 'type') return newRows.filter((row) => (String(row.type || '').trim() || 'Unspecified') === selection.value);
+      if (selection.kind === 'unknown_company') return newRows.filter((row) => !String(row.company_name || '').trim() || String(row.company_name).trim().toLowerCase() === 'unknown');
+      if (selection.kind === 'day_new') return newRows.filter((row) => formatDateInputValue(parseDate(row.created_at)) === selection.value);
+      if (selection.kind === 'day_closed') return closedRows.filter((row) => formatDateInputValue(closedAtForRow(row)) === selection.value);
+      return [];
+    }
     function buildOverviewStats() {
       const { fromDate, toDate } = getOverviewDateRange();
       const weekDays = buildDailyBuckets(fromDate, toDate);
@@ -2142,20 +2182,6 @@ def build_dashboard_html(
         const closedBucket = weekDays.find((item) => item.key === formatDateInputValue(closedAt));
         if (closedBucket) closedBucket.closed += 1;
       });
-      const categoryProgress = [...new Set(filteredRows.map((row) => row.type || 'Unspecified').filter(Boolean))]
-        .map((type) => {
-          const typedRows = filteredRows.filter((row) => (row.type || 'Unspecified') === type);
-          const stats = computeRangeStats(typedRows, fromDate, toDate);
-          return {
-            label: type,
-            pendingFromPrevious: stats.pendingFromPreviousRows.length,
-            createdInRange: stats.createdRows.length,
-            closedInRange: stats.closedRows.length,
-            totalMovement: stats.pendingFromPreviousRows.length + stats.createdRows.length + stats.closedRows.length,
-          };
-        })
-        .filter((item) => item.totalMovement > 0)
-        .sort((left, right) => right.totalMovement - left.totalMovement || left.label.localeCompare(right.label));
       const metrics = [
         { key:'pending_from_previous', label:'Open at start', value:pendingFromPreviousRows.length, previous:previousStats.pendingFromPreviousRows.length, detail:'Tickets already open before this period', className:'' },
         { key:'created_in_range', label:'New tickets', value:inRangeRows.length, previous:previousStats.createdRows.length, detail:'Tickets created during this period', className:'metric-created' },
@@ -2166,19 +2192,16 @@ def build_dashboard_html(
         { key:'customer_waiting', label:'Awaiting reply', detail:'Reply to the customer on the same ticket', className:'metric-waiting' },
         { key:'red_flags', label:'SLA breached', detail:'Review the delay and decide the next step', className:'metric-breached' },
       ].map((metric) => ({ ...metric, value:overviewMetricFilterRows(filteredRows, metric.key, fromDate, comparison.effectiveEnd).length }));
-      const selectedMetric = [...metrics, ...attentionMetrics].find((metric) => metric.key === activeCardFilters.overview);
-      const selectedRows = selectedMetric ? overviewMetricFilterRows(filteredRows, selectedMetric.key, fromDate, comparison.effectiveEnd) : [];
-      const companyMap = {};
-      inRangeRows.forEach((row) => {
-        const companyName = String(row.company_name || 'Unknown').trim() || 'Unknown';
-        if (!companyMap[companyName]) companyMap[companyName] = { label: companyName, bug: 0, feature: 0, task: 0, other: 0, total: 0 };
-        const bucket = categoryBucket(row.type);
-        companyMap[companyName][bucket] += 1;
-        companyMap[companyName].total += 1;
-      });
-      const topCompanies = Object.values(companyMap).sort((left, right) => right.total - left.total || left.label.localeCompare(right.label)).slice(0, 10);
-      return { weekDays, metrics, attentionMetrics, selectedMetric, selectedRows, fromDate, toDate, comparison, categoryProgress, topCompanies };
+      const selectedMetric = breakdownSelection
+        ? {key:'breakdown', label:breakdownSelection.label, detail:'Tickets matching the selected breakdown and current filters'}
+        : [...metrics, ...attentionMetrics].find((metric) => metric.key === activeCardFilters.overview);
+      const selectedRows = breakdownSelection ? breakdownTicketRows(breakdownSelection, inRangeRows, closedInRangeRows)
+        : selectedMetric ? overviewMetricFilterRows(filteredRows, selectedMetric.key, fromDate, comparison.effectiveEnd) : [];
+      const breakdown = buildTicketBreakdown(inRangeRows, previousStats.createdRows);
+      const topCompanies = breakdown.companies.slice(0, 10);
+      return { weekDays, metrics, attentionMetrics, selectedMetric, selectedRows, fromDate, toDate, comparison, topCompanies, breakdown };
     }
+
     function renderOverview() {
       const overview = buildOverviewStats();
       const number = (value) => Number(value).toLocaleString('en-IN');
@@ -2209,6 +2232,7 @@ def build_dashboard_html(
       document.getElementById('overview-attention-metrics').innerHTML = overview.attentionMetrics.map((metric) => cardHtml(metric, false)).join('');
       document.querySelectorAll('[data-overview-card]').forEach((button) => {
         button.addEventListener('click', () => {
+          breakdownSelection = null;
           const metricKey = button.getAttribute('data-overview-card');
           activeCardFilters.overview = activeCardFilters.overview === metricKey ? 'tickets' : metricKey;
           render();
@@ -2224,29 +2248,56 @@ def build_dashboard_html(
           : `${overview.selectedMetric.detail}. Open a ticket to review its progress and plan the next step.`;
         renderDynamicTable('overview', 'overview-results-head', 'overview-results-body', overview.selectedRows);
       }
-      const openedValues = overview.weekDays.map((item) => item.opened);
-      const closedValues = overview.weekDays.map((item) => item.closed);
-      const maxLineValue = Math.max(1, ...openedValues, ...closedValues);
-      document.getElementById('weekly-open-close-chart').innerHTML = buildLineChartSvg(openedValues, closedValues, maxLineValue);
-      document.getElementById('weekly-open-close-labels').innerHTML = overview.weekDays.map((item) => `<span>${escapeHtml(item.label)}<br>${escapeHtml(item.fullLabel)}</span>`).join('');
-      const categoryValues = overview.categoryProgress.flatMap((item) => [item.pendingFromPrevious, item.createdInRange, item.closedInRange]);
-      const maxCategoryValue = Math.max(1, ...categoryValues);
-      document.getElementById('overview-category-bars').innerHTML = overview.categoryProgress.length ? [`<div class="category-progress-head"><div>Category</div><div>Pending From Previous</div><div>Created In Range</div><div>Closed In Range</div></div>`, ...overview.categoryProgress.map((item) => {
-        const pendingWidth = item.pendingFromPrevious ? Math.max(2, Math.round((item.pendingFromPrevious / maxCategoryValue) * 100)) : 0;
-        const createdWidth = item.createdInRange ? Math.max(2, Math.round((item.createdInRange / maxCategoryValue) * 100)) : 0;
-        const closedWidth = item.closedInRange ? Math.max(2, Math.round((item.closedInRange / maxCategoryValue) * 100)) : 0;
-        return `<div class="category-progress-row"><div class="category-progress-label">${escapeHtml(item.label)}</div><div class="category-progress-cell"><div class="mini-track"><div class="mini-fill pending" style="width:${pendingWidth}%"></div></div><div class="category-progress-value">${item.pendingFromPrevious}</div></div><div class="category-progress-cell"><div class="mini-track"><div class="mini-fill created" style="width:${createdWidth}%"></div></div><div class="category-progress-value">${item.createdInRange}</div></div><div class="category-progress-cell"><div class="mini-track"><div class="mini-fill closed" style="width:${closedWidth}%"></div></div><div class="category-progress-value">${item.closedInRange}</div></div></div>`;
-      })].join('') : '<div class="attention-item"><div class="attention-title">No category movement in this range</div><div class="attention-meta">Try a wider date range or remove the ticket category filter.</div></div>';
-      document.getElementById('overview-company-bars').innerHTML = overview.topCompanies.length ? [`<div class="company-progress-head"><div>Company</div><div>Raised Tickets Mix</div><div>Total</div></div>`, ...overview.topCompanies.map((item) => {
-        const total = Math.max(1, item.total);
-        const bugWidth = Math.round((item.bug / total) * 100);
-        const featureWidth = Math.round((item.feature / total) * 100);
-        const taskWidth = Math.round((item.task / total) * 100);
-        const otherWidth = Math.max(0, 100 - bugWidth - featureWidth - taskWidth);
-        return `<div class="company-progress-row"><div class="category-progress-label">${escapeHtml(item.label)}</div><div class="company-progress-cell"><div class="stacked-track"><div class="stack-segment bug" style="width:${bugWidth}%"></div><div class="stack-segment feature" style="width:${featureWidth}%"></div><div class="stack-segment task" style="width:${taskWidth}%"></div><div class="stack-segment other" style="width:${otherWidth}%"></div></div><div class="small">Bug ${item.bug} • Feature ${item.feature} • Task ${item.task} • Other ${item.other}</div></div><div class="category-progress-value">${item.total}</div></div>`;
-      })].join('') : '<div class="attention-item"><div class="attention-title">No company chart data in this range</div><div class="attention-meta">Top companies are based on tickets created in the selected duration.</div></div>';
-
+      renderTicketBreakdown(overview);
     }
+    function renderTicketBreakdown(overview) {
+      const breakdown = overview.breakdown;
+      const number = (value) => Number(value).toLocaleString('en-IN');
+      const countButton = (count, kind, value, label, type = '') => count
+        ? `<button type="button" class="breakdown-count" data-breakdown-kind="${kind}" data-breakdown-value="${escapeHtml(value)}" data-breakdown-type="${escapeHtml(type)}" data-breakdown-label="${escapeHtml(label)}" aria-label="${escapeHtml(label)}: ${number(count)} tickets">${number(count)}</button>` : '0';
+      const table = (headers, body) => `<div class="table-wrap"><table class="breakdown-table"><thead><tr>${headers.map((label) => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+      const leadCompanies = breakdown.companies.filter((company) => company.total === breakdown.companies[0]?.total);
+      const leadTypes = breakdown.types.filter((type) => type.count === breakdown.types[0]?.count);
+      const companySummary = !leadCompanies.length ? 'No named companies in these results.'
+        : leadCompanies.length === 1 ? `${leadCompanies[0].label} raised the most: ${number(leadCompanies[0].total)} new tickets.`
+        : `${leadCompanies.length} companies are tied for the most new tickets (${number(leadCompanies[0].total)} each).`;
+      const typeSummary = !leadTypes.length ? '' : leadTypes.length === 1
+        ? `Most common type: ${leadTypes[0].label} (${number(leadTypes[0].count)} of ${number(breakdown.total)}).`
+        : `${leadTypes.length} ticket types are tied for the most (${number(leadTypes[0].count)} each).`;
+      const newCount = overview.metrics.find((metric) => metric.key === 'created_in_range');
+      const delta = newCount.value - newCount.previous;
+      const trendSummary = !delta ? `New tickets are unchanged ${overview.comparison.label}.`
+        : `${number(Math.abs(delta))} ${delta > 0 ? 'more' : 'fewer'} new tickets ${overview.comparison.label}.`;
+      document.getElementById('overview-breakdown-summary').textContent = breakdown.total
+        ? `${number(breakdown.total)} new tickets. ${companySummary} ${typeSummary} ${trendSummary}`
+        : 'No new tickets in the selected dates and filters. Try a wider date range or another deal stage.';
+      const companyRows = breakdown.companies.map((company, index) => `<tr><th scope="row" class="company-label">${index + 1}. ${escapeHtml(company.label)}</th><td>${countButton(company.total, 'company', company.label, company.label + ' · New tickets')}</td>${breakdown.types.filter((type) => type.count > 0).map((type) => `<td>${countButton(company.byType.get(type.label) || 0, 'company_type', company.label, company.label + ' · ' + type.label, type.label)}</td>`).join('')}</tr>`).join('');
+      const unknownNote = breakdown.unknownRows.length ? `<p class="breakdown-note">${countButton(breakdown.unknownRows.length, 'unknown_company', '', 'Company not identified · New tickets')} new tickets have no identified company. These are excluded from the company ranking and included in ticket-type totals.</p>` : '';
+      document.getElementById('overview-company-bars').innerHTML = (companyRows
+        ? table(['Company', 'New tickets', ...breakdown.types.filter((type) => type.count > 0).map((type) => type.label)], companyRows)
+        : '<p class="breakdown-note">No companies to rank for the selected dates and filters.</p>') + unknownNote;
+      const typeRows = breakdown.types.map((type) => {
+        const change = type.count - type.previous;
+        return `<tr><th scope="row">${escapeHtml(type.label)}</th><td>${countButton(type.count, 'type', type.label, type.label + ' · New tickets')}</td><td>${type.share}%</td><td>${number(type.previous)}</td><td>${change === 0 ? 'No change' : number(Math.abs(change)) + (change > 0 ? ' more' : ' fewer')}</td></tr>`;
+      }).join('');
+      document.getElementById('overview-category-bars').innerHTML = typeRows
+        ? table(['Ticket type', 'New tickets', 'Share of new tickets', 'Previous period', 'Change'], typeRows)
+        : '<p class="breakdown-note">No new tickets to break down.</p>';
+      const dailyRows = overview.weekDays.filter((day) => day.key <= formatDateInputValue(overview.comparison.effectiveEnd)).map((day) => `<tr><th scope="row">${escapeHtml(day.label)} ${escapeHtml(day.fullLabel)}</th><td>${countButton(day.opened, 'day_new', day.key, day.fullLabel + ' · New tickets')}</td><td>${countButton(day.closed, 'day_closed', day.key, day.fullLabel + ' · Closed tickets')}</td></tr>`).join('');
+      document.getElementById('overview-daily-activity').innerHTML = dailyRows
+        ? table(['Date', 'New tickets', 'Closed tickets'], dailyRows)
+        : '<p class="breakdown-note">No elapsed dates in this range yet.</p>';
+      document.querySelectorAll('[data-breakdown-kind]').forEach((button) => {
+        button.addEventListener('click', () => {
+          breakdownSelection = {kind:button.getAttribute('data-breakdown-kind'), value:button.getAttribute('data-breakdown-value'), type:button.getAttribute('data-breakdown-type'), label:button.getAttribute('data-breakdown-label')};
+          activeCardFilters.overview = 'tickets';
+          render();
+          document.getElementById('overview-results-title').focus({preventScroll:true});
+          document.getElementById('overview-results').scrollIntoView({behavior:'smooth', block:'start'});
+        });
+      });
+    }
+
     function renderCheckboxGroup(containerId, options, allLabel, searchable = false) {
       const container = document.getElementById(containerId);
       const searchHtml = searchable ? `<input class="filter-search" type="search" placeholder="Search..." data-filter-search="${containerId}">` : '';
@@ -2495,7 +2546,7 @@ def build_dashboard_html(
     document.getElementById('sla-date-to').addEventListener('input', render);
     document.getElementById('overview-date-from').addEventListener('input', render);
     document.getElementById('overview-date-to').addEventListener('input', render);
-    document.getElementById('overview-clear-selection').addEventListener('click', () => { activeCardFilters.overview = 'tickets'; render(); });
+    document.getElementById('overview-clear-selection').addEventListener('click', () => { activeCardFilters.overview = 'tickets'; breakdownSelection = null; render(); });
     document.getElementById('overview-current-week').addEventListener('click', () => {
       const now = new Date();
       document.getElementById('overview-date-from').value = formatDateInputValue(startOfWeek(now));

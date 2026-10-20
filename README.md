@@ -346,6 +346,10 @@ Useful routes:
 
 The dashboard uses the company assigned to the Freshdesk ticket, then the requester's company, together with existing HubSpot context. For unresolved tickets, it also reads the company ID from `cf_company_id880506` (or `cf_company_id`) and finds exact HubSpot deal matches using `deal_companyid_v2` (or the numeric `deal_companyid`). The associated HubSpot company supplies the name and matching deal link, so deal-stage filters include these tickets too. Ambiguous matches remain unresolved rather than selecting a company by name alone.
 
+### Company and ticket-type breakdowns
+
+Ticket Progress includes **Who is raising tickets, and what are they about?** This shows a plain-language summary, companies ranked by new-ticket count with separate columns for each ticket type, and a ticket-type table with counts, shares, and previous-period changes. Tickets without an identified company are listed separately and remain included in type totals. Click any nonzero count to open its exact ticket list. Expand **Daily new tickets and closures** for date-by-date counts; future dates are omitted. All breakdowns follow the selected dates, category, and deal stage. Old open tickets are kept in the progress cards rather than mixed into the new-ticket ranking.
+
 ### Deal stage filter
 
 The **HubSpot deal stage** column is shown by default in ticket tables and snapshots. It uses the same live HubSpot data as the stage filter, refreshed on each dashboard build (GitHub Pages runs every six hours). Existing column preferences receive the new column once; you can hide it using **Show / Hide Columns**.
